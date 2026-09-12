@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<Import Project="..\Puppet.Common.targets" />
+
+	<PropertyGroup>
+		<RootNamespace>Puppet.Core</RootNamespace>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<Description>Puppet.Core 框架：为任意 .NET 类型（含 WinForm 窗体）提供 AI Agent 可操控的 WebApi 接口，通过反射自动生成能力描述，支持运行时状态查询与方法调用。</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Wima.Core" Version="1.8.1.127" />
+		<PackageReference Include="Wima.Log" Version="1.8.2" />
+		<PackageReference Include="Wima.Web.Engine" Version="1.8.1.127" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\DEVELOPMENT.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+</Project>
