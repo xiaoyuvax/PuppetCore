@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Puppet.Core.Console/Puppet.Core.Console.csproj" />
+  <Project Path="Puppet.Core.WinForms/Puppet.Core.WinForms.csproj" />
+  <Project Path="Puppet.Core/Puppet.Core.csproj" />
+</Solution>

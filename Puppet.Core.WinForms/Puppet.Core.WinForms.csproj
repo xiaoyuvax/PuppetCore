@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<Import Project="..\Puppet.Common.targets" />
+
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows7.0</TargetFramework>
+		<UseWindowsForms>true</UseWindowsForms>
+		<RootNamespace>Puppet.Core.WinForms</RootNamespace>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Puppet.Core\Puppet.Core.csproj" />
+	</ItemGroup>
+
+</Project>
