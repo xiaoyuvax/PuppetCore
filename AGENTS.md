@@ -24,7 +24,7 @@ dotnet pack PuppetCore.slnx -c Release -o "D:\PUB\Nuget Packages"
 ```
 
 - 版本号单一源头：`Puppet.Common.targets` 中 `<Version>`
-- 目标框架：`net6.0;net8.0;net9.0;net10.0`（见 targets 文件）
+- 目标框架：`net8.0;net9.0;net10.0`（见 targets 文件）
 
 ## NuGet 发布流程（固化路径与步骤）
 
@@ -61,5 +61,5 @@ dotnet nuget push "<PackagePath>.nupkg" --api-key "<KEY>" --source "https://api.
 
 - `Puppet.Common.targets` — 全局版本、TFM、AOT/Trim 配置
 - 各项目 `GlobalUsing.cs` — 全局 `using JSN = Newtonsoft.Json;`
-- `push.cmd` — NuGet API Key 存放（不入库）
+- `D:\PUB\Nuget Packages\push.cmd` — NuGet API Key 存放（不入库）
 - `D:\PUB\Nuget Packages` — 固定打包输出目录
