@@ -282,6 +282,103 @@ namespace Puppet.Core.Extentions
             return default;
         }
 
+        /// <summary>
+        /// 解析路径中的单个段（支持 name[index] 索引语法）。
+        /// 支持 IList&lt;T&gt;[int]、IList&lt;T&gt;[string]、Dictionary&lt;string,T&gt;[string]、Array[int]。
+        /// </summary>
+        private static (object value, Type type, string error) ResolvePathPart(object current, Type type, string part)
+        {
+            // 检查是否含索引器 name[index]
+            var bracketStart = part.IndexOf('[');
+            if (bracketStart >= 0 && part.EndsWith(']'))
+            {
+                var propName = part.Substring(0, bracketStart);
+                var indexStr = part.Substring(bracketStart + 1, part.Length - bracketStart - 2);
+
+                // 先解析属性/字段
+                if (!string.IsNullOrEmpty(propName))
+                {
+                    var member = ResolveMember(type, propName);
+                    if (!member.IsFound())
+                        return (null, null, $"property '{propName}' not found on {type.Name}");
+                    current = member.GetValue(current);
+                    if (current == null)
+                        return (null, null, $"property '{propName}' is null");
+                    type = current.GetType();
+                }
+
+                // 索引访问
+                return ResolveIndex(current, type, indexStr);
+            }
+
+            // 普通属性/字段
+            var m = ResolveMember(type, part);
+            if (!m.IsFound())
+                return (null, null, $"property '{part}' not found on {type.Name}");
+            current = m.GetValue(current);
+            return (current, current?.GetType(), null);
+        }
+
+        /// <summary>
+        /// 对集合/数组执行索引访问。
+        /// 支持：IList&lt;T&gt;[int]、IList&lt;T&gt;[string]、Dictionary&lt;string,T&gt;[string]、Array[int]、
+        ///       IList&lt;T&gt;[string]（按 ToString 匹配元素属性）。
+        /// </summary>
+        private static (object value, Type type, string error) ResolveIndex(object collection, Type type, string indexStr)
+        {
+            // IList<T>[int]
+            if (collection is System.Collections.IList list)
+            {
+                if (int.TryParse(indexStr, out int intIdx))
+                {
+                    if (intIdx < 0 || intIdx >= list.Count)
+                        return (null, null, $"index {intIdx} out of range (count={list.Count})");
+                    var val = list[intIdx];
+                    return (val, val?.GetType(), null);
+                }
+                // string index: try matching element property "id" or "name"
+                foreach (var item in list)
+                {
+                    if (item == null) continue;
+                    var idProp = item.GetType().GetProperty("id", BindingFlags.Public | BindingFlags.Instance);
+                    if (idProp != null && string.Equals(idProp.GetValue(item)?.ToString(), indexStr, StringComparison.Ordinal))
+                        return (item, item.GetType(), null);
+                    var nameProp = item.GetType().GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
+                    if (nameProp != null && string.Equals(nameProp.GetValue(item)?.ToString(), indexStr, StringComparison.Ordinal))
+                        return (item, item.GetType(), null);
+                }
+                return (null, null, $"no element with id/name '{indexStr}' in list (count={list.Count})");
+            }
+
+            // Dictionary<string,T>[string]
+            if (collection is System.Collections.IDictionary dict)
+            {
+                var keyType = dict.GetType().GetGenericArguments().FirstOrDefault();
+                if (keyType != null)
+                {
+                    object key = Convert.ChangeType(indexStr, keyType);
+                    if (!dict.Contains(key))
+                        return (null, null, $"key '{indexStr}' not found in dictionary");
+                    var val = dict[key];
+                    return (val, val?.GetType(), null);
+                }
+            }
+
+            // Array[int]
+            if (type.IsArray && collection is Array arr)
+            {
+                if (int.TryParse(indexStr, out int arrIdx))
+                {
+                    if (arrIdx < 0 || arrIdx >= arr.Length)
+                        return (null, null, $"index {arrIdx} out of range (length={arr.Length})");
+                    var val = arr.GetValue(arrIdx);
+                    return (val, val?.GetType(), null);
+                }
+            }
+
+            return (null, null, $"type '{type.Name}' does not support indexing");
+        }
+
         /// <summary>判断成员访问器是否有效（未找到时 Prop 和 Field 均为 null）</summary>
         private static bool IsFound(this in MemberAccessor m) => m.Prop != null || m.Field != null;
 
@@ -331,37 +428,87 @@ namespace Puppet.Core.Extentions
 
             try
             {
-                // 导航到倒数第二个对象（支持属性和字段，如 tscboSceneID 是字段控件）
+                // 导航到倒数第二个对象（支持属性、字段和索引器，如 scenes[0].nodes）
                 for (int i = 0; i < parts.Length - 1; i++)
                 {
-                    var member = ResolveMember(type, parts[i]);
-                    if (!member.IsFound())
-                        return Utils.ToJson(new { ok = false, err = $"property '{parts[i]}' not found on {type.Name}" });
-                    current = member.GetValue(current);
+                    var (val, typ, err) = ResolvePathPart(current, type, parts[i]);
+                    if (err != null)
+                        return Utils.ToJson(new { ok = false, err = err });
+                    current = val;
                     if (current == null)
                         return Utils.ToJson(new { ok = false, err = $"property '{parts[i]}' is null" });
-                    type = current.GetType();
+                    type = typ;
                 }
 
-                var lastMemberName = parts[^1];
-                var lastMember = ResolveMember(type, lastMemberName);
-                if (!lastMember.IsFound())
-                    return Utils.ToJson(new { ok = false, err = $"property '{lastMemberName}' not found on {type.Name}" });
-                if (!lastMember.CanWrite)
-                    return Utils.ToJson(new { ok = false, err = $"property '{lastMemberName}' is read-only" });
+                var lastPart = parts[^1];
+                var lastBracket = lastPart.IndexOf('[');
+                if (lastBracket >= 0 && lastPart.EndsWith(']'))
+                {
+                    // 最后一段含索引器：先导航到集合，再按索引设置值
+                    var propName = lastPart.Substring(0, lastBracket);
+                    if (!string.IsNullOrEmpty(propName))
+                    {
+                        var preMember = ResolveMember(type, propName);
+                        if (!preMember.IsFound())
+                            return Utils.ToJson(new { ok = false, err = $"property '{propName}' not found on {type.Name}" });
+                        current = preMember.GetValue(current);
+                        if (current == null)
+                            return Utils.ToJson(new { ok = false, err = $"property '{propName}' is null" });
+                        type = current.GetType();
+                    }
+                    var indexStr = lastPart.Substring(lastBracket + 1, lastPart.Length - lastBracket - 2);
+                    var (indexed, idxType, idxErr) = ResolveIndex(current, type, indexStr);
+                    if (idxErr != null)
+                        return Utils.ToJson(new { ok = false, err = idxErr });
 
-                // 类型转换
-                object val = value;
-                var propType = lastMember.MemberType;
-                if (value is JToken jt)
-                    val = jt.ToObject(propType);
-                else if (value != null && !propType.IsAssignableFrom(value.GetType()))
-                    val = Convert.ChangeType(value, propType);
+                    // 类型转换
+                    object val = value;
+                    if (idxType != null)
+                    {
+                        if (value is JToken jt2)
+                            val = jt2.ToObject(idxType);
+                        else if (value != null && !idxType.IsAssignableFrom(value.GetType()))
+                            val = Convert.ChangeType(value, idxType);
+                    }
 
-                // WinForm 控件线程安全：UI 属性必须在 UI 线程设置
-                RunOnUi(current, () => { lastMember.SetValue(current, val); return null; });
+                    // 写回索引位置
+                    if (current is System.Collections.IList setList && int.TryParse(indexStr, out int setIdx))
+                    {
+                        RunOnUi(current, () => { setList[setIdx] = val; return null; });
+                    }
+                    else if (current is System.Collections.IDictionary setDict)
+                    {
+                        var keyType = setDict.GetType().GetGenericArguments().FirstOrDefault();
+                        object key = Convert.ChangeType(indexStr, keyType);
+                        RunOnUi(current, () => { setDict[key] = val; return null; });
+                    }
+                    else
+                        return Utils.ToJson(new { ok = false, err = $"type '{type.Name}' does not support index setting" });
 
-                return Utils.ToJson(new { ok = true, path = path, value = val, propType = propType.FullName });
+                    return Utils.ToJson(new { ok = true, path = path, value = val, propType = idxType?.FullName });
+                }
+                else
+                {
+                    // 普通属性/字段
+                    var lastMember = ResolveMember(type, lastPart);
+                    if (!lastMember.IsFound())
+                        return Utils.ToJson(new { ok = false, err = $"property '{lastPart}' not found on {type.Name}" });
+                    if (!lastMember.CanWrite)
+                        return Utils.ToJson(new { ok = false, err = $"property '{lastPart}' is read-only" });
+
+                    // 类型转换
+                    object val = value;
+                    var propType = lastMember.MemberType;
+                    if (value is JToken jt)
+                        val = jt.ToObject(propType);
+                    else if (value != null && !propType.IsAssignableFrom(value.GetType()))
+                        val = Convert.ChangeType(value, propType);
+
+                    // WinForm 控件线程安全：UI 属性必须在 UI 线程设置
+                    RunOnUi(current, () => { lastMember.SetValue(current, val); return null; });
+
+                    return Utils.ToJson(new { ok = true, path = path, value = val, propType = propType.FullName });
+                }
             }
             catch (Exception ex)
             {
@@ -390,26 +537,26 @@ namespace Puppet.Core.Extentions
             string navError = null;
             string navType = null;
 
-            // 导航函数：支持属性和字段（如 tscboSceneID.Text），需在 UI 线程执行避免跨线程访问
+            // 导航函数：支持属性、字段和索引器（如 scenes[0].nodes[3].enabled），需在 UI 线程执行避免跨线程访问
             void DoNavigate()
             {
                 object current = target;
                 Type type = target.GetType();
                 foreach (var part in parts)
                 {
-                    var member = ResolveMember(type, part);
-                    if (!member.IsFound())
+                    var (val, typ, err) = ResolvePathPart(current, type, part);
+                    if (err != null)
                     {
-                        navError = $"property '{part}' not found on {type.Name}";
+                        navError = err;
                         return;
                     }
-                    current = member.GetValue(current);
+                    current = val;
                     if (current == null)
                     {
                         navResult = null; // 中途 null 是合法的（如未选中项）
                         return;
                     }
-                    type = current.GetType();
+                    type = typ;
                 }
                 navResult = current;
                 navType = type.FullName;
