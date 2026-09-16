@@ -3,7 +3,7 @@
 	<Import Project="..\Puppet.Common.targets" />
 
 	<PropertyGroup>
-		<TargetFramework>net10.0-windows7.0</TargetFramework>
+		<TargetFrameworks>net8.0-windows7.0;net9.0-windows7.0;net10.0-windows7.0</TargetFrameworks>
 		<UseWindowsForms>true</UseWindowsForms>
 		<RootNamespace>Puppet.Core.WinForms</RootNamespace>
 	</PropertyGroup>

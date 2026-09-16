@@ -19,6 +19,8 @@ namespace Puppet.Core.Describe
         public List<MethodDesc> Methods { get; set; }
         /// <summary>字段列表</summary>
         public List<FieldDesc> Fields { get; set; }
+        /// <summary>Agent 运行时提示列表</summary>
+        public List<HintDesc> Hints { get; set; }
     }
 
     /// <summary>属性描述</summary>
@@ -87,5 +89,24 @@ namespace Puppet.Core.Describe
         public string Description { get; set; }
         /// <summary>是否只读</summary>
         public bool IsReadOnly { get; set; }
+    }
+
+    /// <summary>Agent 运行时提示描述</summary>
+    public class HintDesc
+    {
+        /// <summary>目标类型全名</summary>
+        public string TargetType { get; set; }
+        /// <summary>目标成员名（类级为空）</summary>
+        public string TargetMember { get; set; }
+        /// <summary>成员种类：Type/Method/Property/Field/Event/Constructor</summary>
+        public string MemberKind { get; set; }
+        /// <summary>分类：Tip/Warning/Todo/Gotcha/Info</summary>
+        public string Category { get; set; }
+        /// <summary>提示内容</summary>
+        public string Text { get; set; }
+        /// <summary>作者 Agent ID</summary>
+        public string AgentId { get; set; }
+        /// <summary>创建时间（ISO8601）</summary>
+        public string CreatedAt { get; set; }
     }
 }

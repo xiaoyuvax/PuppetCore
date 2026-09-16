@@ -5,9 +5,9 @@ using Wima.Core;
 namespace Puppet.Core.Describe
 {
     /// <summary>
-    /// 能力描述生成器。通过反射枚举可被 Agent 访问的成员，提取 &lt;summary&gt;。
+    /// 能力描述生成器。通过反射枚举可被 Agent 访问的成员，提取 <summary>。
     /// 规则：public 成员默认可见；非 public 成员需带 [PuppetExpose]；所有成员带 [PuppetIgnore] 后不可见。
-    /// &lt;summary&gt; 由人类维护，可能陈旧失真，仅作次级参考（通过 SummarySource 字段标识）。
+    /// <summary> 由人类维护，可能陈旧失真，仅作次级参考（通过 SummarySource 字段标识）。
     /// </summary>
     public static class CapabilityDescriber
     {
@@ -26,7 +26,8 @@ namespace Puppet.Core.Describe
                 SummarySource = typeSource,
                 Properties = EnumerateProperties(type),
                 Methods = EnumerateMethods(type),
-                Fields = EnumerateFields(type)
+                Fields = EnumerateFields(type),
+                Hints = EnumerateHints(type)
             };
             return format == DescribeFormat.Json
                 ? Utils.ToJson(doc, compact: true)
@@ -112,6 +113,76 @@ namespace Puppet.Core.Describe
                 }).ToList();
         }
 
+        private static List<HintDesc> EnumerateHints(Type type)
+        {
+            var hints = new List<HintDesc>();
+
+            // Type level
+            var typeHints = type.GetCustomAttributes<PuppetHintAttribute>(false);
+            foreach (var n in typeHints)
+                hints.Add(CreateHintDesc(type.FullName, "", "Type", n));
+
+            // Methods
+            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(m => !m.IsSpecialName);
+            foreach (var m in methods)
+            {
+                var mHints = m.GetCustomAttributes<PuppetHintAttribute>(false);
+                foreach (var n in mHints)
+                    hints.Add(CreateHintDesc(type.FullName, m.Name, "Method", n));
+            }
+
+            // Properties
+            var props = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var p in props)
+            {
+                var pHints = p.GetCustomAttributes<PuppetHintAttribute>(false);
+                foreach (var n in pHints)
+                    hints.Add(CreateHintDesc(type.FullName, p.Name, "Property", n));
+            }
+
+            // Fields
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var f in fields)
+            {
+                var fHints = f.GetCustomAttributes<PuppetHintAttribute>(false);
+                foreach (var n in fHints)
+                    hints.Add(CreateHintDesc(type.FullName, f.Name, "Field", n));
+            }
+
+            // Events
+            var events = type.GetEvents(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var e in events)
+            {
+                var eHints = e.GetCustomAttributes<PuppetHintAttribute>(false);
+                foreach (var n in eHints)
+                    hints.Add(CreateHintDesc(type.FullName, e.Name, "Event", n));
+            }
+
+            // Constructors
+            var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var c in ctors)
+            {
+                var cHints = c.GetCustomAttributes<PuppetHintAttribute>(false);
+                foreach (var n in cHints)
+                    hints.Add(CreateHintDesc(type.FullName, ".ctor", "Constructor", n));
+            }
+
+            return hints;
+        }
+
+        private static HintDesc CreateHintDesc(string targetType, string targetMember, string memberKind, PuppetHintAttribute attr)
+            => new HintDesc
+            {
+                TargetType = targetType,
+                TargetMember = targetMember,
+                MemberKind = memberKind,
+                Category = attr.Category,
+                Text = attr.Text,
+                AgentId = attr.AgentId,
+                CreatedAt = attr.CreatedAt
+            };
+
         private static string ToMarkdown(CapabilityDoc doc)
         {
             var sb = new StringBuilder();
@@ -156,6 +227,19 @@ namespace Puppet.Core.Describe
                 {
                     sb.AppendLine($"- `{f.Name}` ({f.Type}) [ReadOnly:{f.IsReadOnly}]");
                     if (!string.IsNullOrEmpty(f.Summary)) sb.AppendLine($"  - Summary: {f.Summary}");
+                }
+            }
+
+            if (doc.Hints?.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Hints");
+                foreach (var n in doc.Hints)
+                {
+                    var target = string.IsNullOrEmpty(n.TargetMember) ? n.TargetType : $"{n.TargetType}.{n.TargetMember}";
+                    sb.AppendLine($"- **[{n.Category}]** `{target}` ({n.MemberKind})");
+                    sb.AppendLine($"  {n.Text}");
+                    if (!string.IsNullOrEmpty(n.AgentId)) sb.AppendLine($"  > by {n.AgentId} @ {n.CreatedAt}");
                 }
             }
             return sb.ToString();

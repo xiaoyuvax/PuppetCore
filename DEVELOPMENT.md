@@ -101,6 +101,8 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 请求头一律：`Authorization: Bearer <key>`
 
+### 核心端点（需实例密钥或全局密钥）
+
 | 端点                   | 方法   | 说明                                                                    |
 | -------------------- | ---- | --------------------------------------------------------------------- |
 | `/agent/registry`    | GET  | 条件查询实例列表（type/tags/includeInternal/activeWithin/keyword/offset/limit） |
@@ -110,8 +112,54 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | `/agent/describe`    | GET  | 获取实例 schema（`format=md\|json`）                                        |
 | `/agent/invoke`      | POST | 调用方法：`?name=X&method=Y`，body = JSON 数组 args\[]                        |
 | `/agent/logs`        | GET  | 读取 logger 缓冲（`name` 可不填列出全部 logger 名）                                 |
+
+### 元端点（仅全局密钥）
+
+| 端点                   | 方法   | 说明                                                                    |
+| -------------------- | ---- | --------------------------------------------------------------------- |
 | `/agent/usage`       | GET  | 使用率摘要：各功能类别调用次数 + error 数（供优化/清理由）                                    |
 | `/agent/key/refresh` | POST | 刷新全局密钥                                                                |
+
+### 多 Agent 协调端点（仅全局密钥）
+
+| 端点                       | 方法   | 说明                                                                    |
+| ----------------------- | ---- | --------------------------------------------------------------------- |
+| `/agent/book`           | GET  | 查询所有 Agent 状态（`includeStale=true` 包含超时未心跳者）                       |
+| `/agent/book/heartbeat` | POST | 显式心跳，Body: `{id, purpose?, op?, waitEst?, site?, lockMode?}`       |
+| `/agent/book/release`   | POST | 正常关闭前检查/等待，Body: `{id, waitForOthers?, timeoutSec?}` → `{canShutdown}` |
+| `/agent/lock/acquire`   | POST | 获取建议性锁，Body: `{site, mode:"Read|Write", timeoutMs?, agentId?}`    |
+| `/agent/lock/release`   | POST | 释放锁，Body: `{site, agentId?}`                                         |
+| `/agent/lock/status`    | GET  | 查询锁状态，`?site=*` 返回全部，`?site=Form1.btnSave` 返回单个                     |
+
+### 运行时元信息端点
+
+| 端点                   | 方法   | 说明                                                                    |
+| -------------------- | ---- | --------------------------------------------------------------------- |
+| `/agent/capabilities`| GET  | 查询当前 PuppetCore 运行时能力（版本、源码/NuGet、功能支持矩阵）                 |
+| `/agent/hints`       | GET  | 查询 `[PuppetHint]` 提示，`?name=X` 查单实例，不填查所有实例                           |
+
+### 调用约定（重要）
+
+* `/agent/invoke` 的 `name`、`method` 是**查询参数**（中文方法名需 URL 编码），`args` 放 body 的 JSON 数组。
+
+* 优先用 `/agent/get?path=<member>` 读单个值，而非序列化整对象（见「踩坑」）。
+
+* `/agent/set` 设控件值即模拟真实用户操作（会触发对应事件），用于测试现场。
+
+* async 方法：invoke 会阻塞等待 Task；无返回值时返回 `null`。
+
+### 透传参数（所有 `/agent/*` 端点均支持，可选，向后兼容）
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `agentId` | string | Agent 唯一标识（建议 GUID） |
+| `agentPurpose` | string | 目的简述（如 "debug login flow"） |
+| `agentOp` | string | 当前操作描述 |
+| `agentWaitEst` | int | 预估还需等待秒数 |
+| `site` | string | 操作站点路径（如 `"Form1.txtName.Text"`、`"Form1.*"`、`"*"` 整实例） |
+| `lockMode` | string | `"Read"`/`"Write"`/`"None"` |
+
+> 每次调用自动更新 AgentBook 心跳，无需额外请求。
 
 ### 调用约定（重要）
 
@@ -139,7 +187,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
    * 两类接口都可能贯穿"开发到成果"全周期，管好各自的**时间节点**（引入、稳定、交付清理）。
 4. **操作类接口的硬约束**：**严禁**在宿主工程内部编写/暴露专门的调试代码或方法（如 `XxxForTest()`）。必须只通过调用**用户工程本身已有的、面向用户的代码/方法/接口**来模拟用户操作流程，到达测试现场。
-5. **接口暴露先授权**：任何向 Agent 暴露新接口的改动，**先向用户请求授权**，得到确认后再实施。
+5. **接口暴露原则**：Agent 可按需暴露成员（含非 public 成员加 `[PuppetExpose]`），无需用户授权。**前提**：不改变宿主原定设计行为或表现。`[PuppetExpose]` 与 `[PuppetHint]` 可长期保留供后续使用，无需清理，直至统一清理节点或用户显式要求清理。
 
 ## 安全
 
@@ -159,7 +207,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 * 涉及 UI 的状态变更，异步事件完成后需**轮询就绪标志**（如 `/agent/get?path=IsReady`）再走下一步。
 
-* 暴露任何新成员前先取得用户授权。
+* 暴露新成员无需用户授权，前提是不改变宿主原定设计行为或表现；`[PuppetExpose]` 与 `[PuppetHint]` 可长期保留，无需清理。
 
 ## 使用日志（观测与分析）
 
@@ -179,6 +227,145 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 本框架默认使用**内建 WebServerBase**，端点入口参数类型（`WebRequest`/`WebResponse`）由内部引用的库提供。
 若宿主改用**外部 Web 服务器**（如 Kestrel/ASP.NET），外部框架的请求对象与本框架的 `WebRequest` 类型不同，**必须做对应的类型包装**才能交给框架内的处理过程（`PuppetWebHandler.TryHandle`）。否则端点无法正常读取 `Path`/`Queries`/`Headers`/`InputStream`。
+
+## 多 Agent 协调机制
+
+### 三大注册表职责对比
+
+| 机制 | 管理对象 | 生命周期 | 核心目的 |
+|------|----------|----------|----------|
+| **PuppetRegistry** | `IPuppet` 实例（窗体、WebServer 等） | 宿主进程存活期 | "被调试的东西在哪/是谁" |
+| **AgentBook** | Agent 会话（调用方身份） | Agent 连接期（心跳 5 分钟超时清理） | "谁在调试/他们想干什么/正常关闭握手" |
+| **SiteLock** | 站点锁（字符串路径） | 显式 Acquire/Release | "多 Agent 同区域写操作不冲突" |
+
+> **关键**：Puppet.Core 运行在宿主进程内，宿主崩溃 → 所有静态表失效。崩溃重启协商靠外部守护进程/用户，**不在本框架范围**。
+
+### PLog —— 极简日志转发
+
+宿主已有日志系统（log4net/Serilog/NLog/自研）时，Agent 想同步一份到 Puppet 端观测，**零侵入、零依赖传播**：
+
+```csharp
+// 引用 Puppet.Core
+using Puppet.Core;
+
+// 原有日志调用点包一层，返回原字符串，inline 语法
+UserLogger.Debug(PLog.Fwd(LogLevel.Debug, "login user={0}", userName));
+// 等价于：UserLogger.Debug("login user=zhangsan");  // 宿主日志照常
+// 同时 Puppet.Core 的 "Puppet.Forwarded" logger 也收到一条 Debug 日志
+```
+
+* `PLog.Fwd(LogLevel, string, loggerName?)` —— 返回原 message，不破坏原有格式
+* 调试期临时插入，调试完删掉包装即可，业务代码零污染
+* 绕过宿主日志级别过滤（宿主设 Info，Agent 仍能收 Debug）
+
+### AgentBook —— Agent 会话注册表
+
+**自动心跳**：所有 `/agent/*` 调用自动更新（透传参数见上表），无需显式调用。
+
+**显式端点**：
+- `GET /agent/book?includeStale=true` — 查询在场 Agent
+- `POST /agent/book/heartbeat` — 显式心跳（长轮询场景）
+- `POST /agent/book/release` — 正常关闭前检查：
+  ```json
+  { "id": "agent-guid", "waitForOthers": true, "timeoutSec": 30 }
+  ```
+  返回 `{ "canShutdown": true }` 表示无其他活跃 Agent，可安全关闭进程；`false` 则建议不关或继续等待。
+
+**AgentInfo 字段**：`Id`、`Purpose`、`Operation`、`EstimatedWaitSeconds`、`Status(Active/Idle/ShuttingDown)`、`RegisteredAt`、`LastHeartbeatAt`、`PuppetInstanceName`、`CurrentSite`、`CurrentLockMode`。
+
+### SiteLock —— 建议性读写锁
+
+**站点** = 字符串路径，示例：
+- `"Form1.txtName.Text"` — 单控件属性
+- `"Form1.*"` — 整个窗体所有控件
+- `"*"` — 整个 Puppet 实例独占
+
+**模式**：
+- `Read` — 共享锁，多 Agent 可同时持有（适合 `/agent/get`、`/agent/state` 等只读）
+- `Write` — 独占锁，仅单 Agent 持有（适合 `/agent/set`、`/agent/invoke` 非幂等写操作）
+- `None` — 无锁（默认）
+
+**协议（约定俗成，不强制拦截）**：
+```mermaid
+sequenceDiagram
+    Agent A->>Puppet: POST /agent/lock/acquire {site:"Form1.btnSave", mode:"Write"}
+    Puppet-->>Agent A: {ok:true}
+    Agent A->>Puppet: POST /agent/invoke {method:"ClickSave"}
+    Puppet-->>Agent A: result
+    Agent A->>Puppet: POST /agent/lock/release {site:"Form1.btnSave"}
+```
+
+* **建议性**：框架不拦截未加锁的调用，Agent 自愿遵守
+* **超时自动释放**：Acquire 超时默认 5s；心跳超时 5 分钟顺带清理该 Agent 持有的锁，防死锁
+* **重入**：同一 Agent 对同一站点 Write 可重入
+
+### PuppetHintAttribute —— 运行时提示
+
+允许 Agent 给类型及其成员添加可查询的提示（避坑、提示、Todo 等），随 `/agent/describe` 返回或单独查 `/agent/hints`。
+
+```csharp
+using Puppet.Core;
+
+[PuppetHint("Warning", "此属性修改会触发重绘，频繁调用会卡 UI")]
+public string StatusText { get; set; }
+
+[PuppetHint("Gotcha", "调用前必须先 CheckReady()，否则抛异常")]
+[PuppetHint("Todo", "后续改为异步版本")]
+public void RefreshData() { ... }
+```
+
+**特性参数**：
+- `category`：分类（`Tip`/`Warning`/`Gotcha`/`Todo`/`Info` 等）
+- `text`：注释内容
+- `AgentId`（可选）：作者 Agent ID
+- `CreatedAt`（可选）：自动填充 ISO8601 时间
+
+**查询方式**：
+- `GET /agent/hints?name=MyForm` — 单实例所有提示
+- `GET /agent/hints` — 所有实例提示
+- `/agent/describe` 的 `Notes` 字段也包含注释
+
+**用途**：Agent 发现坑点/约束时即时标记，后续 Agent 复用，避免重复踩坑。
+
+### PuppetCoreCapabilities —— 运行时能力探测
+
+不同宿主可能引用不同版本/构建的 PuppetCore（NuGet 包 vs 源码引用），Agent 需知晓当前实例具备哪些能力。
+
+**端点**：`GET /agent/capabilities`（仅全局密钥）
+
+**返回示例**：
+```json
+{
+  "version": "1.0.0",
+  "informationalVersion": "1.0.0+abc1234",
+  "assemblyPath": "D:\\app\\Puppet.Core.dll",
+  "isSourceReference": true,
+  "isNuGetPackage": false,
+  "targetFramework": ".NETCoreApp,Version=v10.0",
+  "buildConfiguration": "Release",
+  "supportsPuppetHint": true,
+  "supportsAgentBook": true,
+  "supportsSiteLock": true,
+  "supportsLogForwarder": true,
+  "supportsMultiAgent": true
+}
+```
+
+**关键字段**：
+| 字段 | 含义 |
+|------|------|
+| `isSourceReference` | `true` = 源码引用，Agent 可修改 PuppetCore 源码并重新编译；`false` = NuGet 包，不可改源码 |
+| `isNuGetPackage` | 互斥标识 |
+| `supportsPuppetHint` | 是否支持 `[PuppetHint]` 与 `/agent/hints` |
+| `supportsAgentBook` | 是否支持多 Agent 协调 |
+| `supportsSiteLock` | 是否支持建议性锁 |
+| `supportsLogForwarder` | 是否支持 `PLog.Fwd()` |
+| `supportsMultiAgent` | 是否支持多 Agent 共存 |
+
+**Agent 决策示例**：
+- `isSourceReference=true` → 发现缺功能可直接在 PuppetCore 源码加端点/修复 Bug → 重新编译宿主
+- `isSourceReference=false` → 只能用现有端点，或通过宿主侧扩展 `UseHandler` 注入自定义端点
+- `supportsPuppetHint=false` → 不要尝试写/读 `/agent/hints`
 
 ## 实战踩坑记录（来自 VisualDataHub 等项目）
 
