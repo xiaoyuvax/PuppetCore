@@ -106,6 +106,17 @@ namespace Puppet.Core.Web
                 return true;
             }
 
+            if (req.Path == "/agent/docs" && req.Method == "GET")
+            {
+                if (!PuppetKeyVault.AuthorizeGlobal(key)) { req.Response.SetStatus404(); return true; }
+                using var stream = typeof(PuppetWebHandler).Assembly.GetManifestResourceStream("Puppet.Core.DEVELOPMENT.md")
+                    ?? throw new InvalidOperationException("Embedded DEVELOPMENT.md was not found.");
+                using var reader = new System.IO.StreamReader(stream, Encoding.UTF8);
+                req.Response.Buffer = Encoding.UTF8.GetBytes(reader.ReadToEnd());
+                req.Response.Headers.Set("Content-Type", "text/markdown; charset=utf-8");
+                return true;
+            }
+
             // PuppetCore 能力端点（仅全局密钥）
             if (req.Path == "/agent/capabilities" && req.Method == "GET")
             {
