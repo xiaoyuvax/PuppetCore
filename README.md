@@ -33,6 +33,14 @@ Puppet.Core 让 Agent **自动调试应用程序**——面向需要编译后进
 
 ### 快速开始
 
+`Puppet.Core` 包可从 **NuGet.org** 获取：
+
+```bash
+dotnet add package Puppet.Core --source https://api.nuget.org/v3/index.json
+```
+
+安装后请先阅读下方“文档”中的指南，并将读取入口写入宿主工程的 `AGENTS.md`。
+
 目标框架：net8.0 / net9.0 / net10.0。宿主程序实现 `IPuppet`（3 个属性），即可被 Agent 发现与操控。
 
 **内建服务器**（宿主无 Web 服务器）：
@@ -63,12 +71,21 @@ new PuppetWebServer().UseFormControls().Start("0.0.0.0:9090");
 | `/agent/describe` | GET | 实例能力描述（Json / Markdown） |
 | `/agent/invoke` | POST | 调用实例方法 |
 | `/agent/logs` | GET | 读取日志缓冲 |
+| `/agent/docs` | GET | 读取内嵌 DEVELOPMENT.md（全局密钥） |
 | `/agent/usage` | GET | 使用率统计（供能力清理） |
 | `/agent/key/refresh` | POST | 刷新全局密钥 |
 
 ### 文档
 
 * [DEVELOPMENT.md](DEVELOPMENT.md) —— 面向 AI Agent 的开发与使用指南：集成模式、调用约定、安全约束、实战踩坑记录。
+
+**Agent 读取入口（二选一）**：
+
+1. **`/agent/docs` 端点**：宿主运行后，Agent 使用 `Authorization: Bearer <全局密钥>` 请求 `GET /agent/docs`，即可取回与运行中程序集版本一致的 DEVELOPMENT.md（`text/markdown; charset=utf-8`），无需实例名。**建议 Agent 在安装/集成时将以下指南写入宿主工程的 `AGENTS.md`**，供后续会话发现入口；NuGet 不会自动修改该文件：
+
+   > 使用 PuppetCore 调试宿主前，先读取宿主 Puppet 服务的 `GET /agent/docs`，通过 Authorization Bearer 头传递运行时全局密钥；宿主未启动或所用旧版本不支持此端点时，读取已还原 NuGet 包中的 DEVELOPMENT.md。记录服务地址及密钥获取方式，不要将实际密钥写入文件或日志。
+
+2. **NuGet 包内文档**：还原依赖后，可读取 `<global-packages>/puppet.core/<version>/DEVELOPMENT.md`。Windows 默认路径为 `%USERPROFILE%\.nuget\packages\puppet.core\<version>\DEVELOPMENT.md`，Linux/macOS 为 `~/.nuget/packages/puppet.core/<version>/DEVELOPMENT.md`。在宿主目录运行 `dotnet nuget locals global-packages --list` 查询缓存位置；如工程自定义了还原目录，以 `obj/project.assets.json` 中的 `packageFolders` 为准，`<version>` 使用该文件中实际解析的 Puppet.Core 版本，而非任取缓存中的最新版本。
 
 ### 许可证
 
@@ -105,6 +122,14 @@ Puppet.Core enables agents to **automatically debug applications** — specifica
 
 ### Quick Start
 
+The `Puppet.Core` package is available on **NuGet.org**:
+
+```bash
+dotnet add package Puppet.Core --source https://api.nuget.org/v3/index.json
+```
+
+After installation, read the guide under "Documentation" below and add the read entry to the host project's `AGENTS.md`.
+
 Target framework: net8.0 / net9.0 / net10.0. A host implements `IPuppet` (3 properties) to become discoverable and controllable by agents.
 
 **Built-in server** (host has no web server):
@@ -135,12 +160,21 @@ All requests require the `Authorization: Bearer <key>` header:
 | `/agent/describe` | GET | Capability schema (Json / Markdown) |
 | `/agent/invoke` | POST | Invoke an instance method |
 | `/agent/logs` | GET | Read log buffers |
+| `/agent/docs` | GET | Fetch the embedded DEVELOPMENT.md (global key) |
 | `/agent/usage` | GET | Usage statistics (for capability pruning) |
 | `/agent/key/refresh` | POST | Rotate the global key |
 
 ### Documentation
 
 * [DEVELOPMENT.md](DEVELOPMENT.md) — the AI-agent-oriented development and usage guide: integration modes, calling conventions, security rules, and pitfalls from practice.
+
+**Agent read entries (choose one):**
+
+1. **`/agent/docs` endpoint**: while the host is running, request `GET /agent/docs` with `Authorization: Bearer <global key>` to retrieve DEVELOPMENT.md matching the running assembly (`text/markdown; charset=utf-8`). No instance name is required. **Agents should add the following guidance to the host project's `AGENTS.md` during installation/integration** so future sessions can discover it; NuGet does not modify that file automatically:
+
+   > Before debugging the host with PuppetCore, read `GET /agent/docs` from the host's Puppet service, passing the runtime global key in the Authorization Bearer header. If the host is not running or an older version lacks this endpoint, read DEVELOPMENT.md from the restored NuGet package. Record the service address and how to obtain the key, never the actual key in files or logs.
+
+2. **Documentation inside the NuGet package**: after restore, read `<global-packages>/puppet.core/<version>/DEVELOPMENT.md`. Defaults are `%USERPROFILE%\.nuget\packages\puppet.core\<version>\DEVELOPMENT.md` on Windows and `~/.nuget/packages/puppet.core/<version>/DEVELOPMENT.md` on Linux/macOS. Run `dotnet nuget locals global-packages --list` from the host directory to locate the cache. For project-specific restore directories, use `packageFolders` in `obj/project.assets.json`; choose the Puppet.Core version actually resolved in that file, not simply the newest cached version.
 
 ### License
 

@@ -5,6 +5,7 @@
 	<PropertyGroup>
 		<RootNamespace>Puppet.Core</RootNamespace>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<Description>Puppet.Core 框架：为任意 .NET 类型（含 WinForm 窗体）提供 AI Agent 可操控的 WebApi 接口，通过反射自动生成能力描述，支持运行时状态查询与方法调用。</Description>
 	</PropertyGroup>
 
@@ -20,6 +21,8 @@
 
 	<ItemGroup>
 		<None Include="..\DEVELOPMENT.md" Pack="true" PackagePath="\" />
+		<EmbeddedResource Include="..\DEVELOPMENT.md" LogicalName="Puppet.Core.DEVELOPMENT.md" />
+		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 </Project>
