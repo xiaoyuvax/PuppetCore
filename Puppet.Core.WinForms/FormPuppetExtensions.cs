@@ -28,28 +28,50 @@ namespace Puppet.Core.WinForms
             return Utils.ToJson(new { ok = true, controls });
         }
 
-        /// <summary>执行控件操作（Click/SetText/SelectIndex/Toggle 等）</summary>
+        /// <summary>执行控件操作（Click/SetText/SelectIndex/Toggle 等）。
+        /// 控件树找不到时回落到菜单项（ToolStripMenuItem 不是 Control，需单独寻址）。</summary>
         /// <param name="form">目标窗体</param>
-        /// <param name="controlName">控件名</param>
+        /// <param name="controlName">控件名或菜单项名</param>
         /// <param name="action">操作类型：click/settext/select/toggle/getvalue/setvalue</param>
         /// <param name="value">操作值</param>
         public static string InvokeControl(this IPuppet form, string controlName, string action, object value = null)
         {
             if (form is not Control root) return Utils.ToJson(new { ok = false, err = "not a form" });
             var ctrl = FindControl(root, controlName);
-            if (ctrl == null) return Utils.ToJson(new { ok = false, err = "control not found" });
+            if (ctrl == null)
+            {
+                var mi = FindMenuItem(root, controlName);
+                if (mi == null) return Utils.ToJson(new { ok = false, err = "control not found" });
+                if (root.InvokeRequired)
+                    return (string)root.Invoke(new Func<string>(() => InvokeMenuItemCore(mi, action)));
+                return InvokeMenuItemCore(mi, action);
+            }
 
             if (ctrl.InvokeRequired)
                 return (string)ctrl.Invoke(new Func<string>(() => InvokeControlCore(ctrl, action, value)));
             return InvokeControlCore(ctrl, action, value);
         }
 
-        /// <summary>获取指定控件的运行时状态</summary>
+        /// <summary>获取指定控件或菜单项的运行时状态</summary>
         public static string GetControlState(this IPuppet form, string controlName)
         {
             if (form is not Control root) return Utils.ToJson(new { ok = false, err = "not a form" });
             var ctrl = FindControl(root, controlName);
-            if (ctrl == null) return Utils.ToJson(new { ok = false, err = "control not found" });
+            if (ctrl == null)
+            {
+                var mi = FindMenuItem(root, controlName);
+                if (mi == null) return Utils.ToJson(new { ok = false, err = "control not found" });
+                return Utils.ToJson(new
+                {
+                    ok = true,
+                    name = mi.Name,
+                    text = mi.Text,
+                    type = mi.GetType().Name,
+                    enabled = mi.Enabled,
+                    visible = mi.Visible,
+                    checkedState = mi.Checked
+                });
+            }
             return Utils.ToJson(new
             {
                 ok = true,
@@ -97,6 +119,56 @@ namespace Puppet.Core.WinForms
                 if (child != null) return child;
             }
             return null;
+        }
+
+        /// <summary>在控件树中递归查找菜单项（含子菜单），找不到返回 null</summary>
+        private static ToolStripMenuItem FindMenuItem(Control root, string name)
+        {
+            foreach (Control c in root.Controls)
+            {
+                if (c is MenuStrip ms)
+                {
+                    foreach (ToolStripItem item in ms.Items)
+                        if (FindMenuItemRecursive(item, name) is ToolStripMenuItem hit) return hit;
+                }
+                var found = FindMenuItem(c, name);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        private static ToolStripMenuItem FindMenuItemRecursive(ToolStripItem item, string name)
+        {
+            if (item == null) return null;
+            if (item is ToolStripMenuItem mi)
+            {
+                if (mi.Name == name) return mi;
+                foreach (ToolStripItem child in mi.DropDownItems)
+                    if (FindMenuItemRecursive(child, name) is ToolStripMenuItem hit) return hit;
+            }
+            return null;
+        }
+
+        private static string InvokeMenuItemCore(ToolStripMenuItem mi, string action)
+        {
+            try
+            {
+                switch (action)
+                {
+                    case "click":
+                        if (!mi.Enabled) return Utils.ToJson(new { ok = false, err = "menu item disabled" });
+                        mi.PerformClick();
+                        return Utils.ToJson(new { ok = true, clicked = mi.Name });
+                    case "gettext":
+                        return Utils.ToJson(new { ok = true, name = mi.Name, text = mi.Text, enabled = mi.Enabled, checkedState = mi.Checked });
+                    default:
+                        return Utils.ToJson(new { ok = false, err = $"unsupported action '{action}' on menu item {mi.Name}" });
+                }
+            }
+            catch (Exception ex)
+            {
+                return Utils.ToJson(new { ok = false, err = ex.Message });
+            }
         }
 
         private static string InvokeControlCore(Control ctrl, string action, object value)
