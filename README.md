@@ -27,9 +27,16 @@ Puppet.Core 让 Agent **自动调试应用程序**——面向需要编译后进
 
 | 项目 | 说明 |
 | ---- | ---- |
-| Puppet.Core | 通用核心：接口、序列化、能力描述、注册表、Web 端点、内建 Web 服务器、使用日志 |
+| Puppet.Core | 通用核心：接口、序列化、能力描述、注册表、Web 端点、内建 Web 服务器、使用日志、Console 进程诊断 |
 | Puppet.Core.WinForms | WinForms 专用：控件树遍历、Click / Text / Select 控件操作 |
-| Puppet.Core.Console | Console 专用：进程状态、stdin/stdout 交互 |
+| TestGround.Winform | WinForms 工作台（任务看板）：框架自我调试与演进的常驻试验场 |
+| TestGround.Console | 控制台工作台（支出账本）：命令行宿主的集成与验证试验场 |
+| TestGround.Wpf | WPF 工作台（阅读清单）：数据绑定与 Dispatcher 场景试验场 |
+| TestGround.AspNetCore | ASP.NET Core 工作台（库存预留）：Web 服务与并发场景试验场 |
+
+### TestGround：自我调试与演进试验场
+
+四个 TestGround 应用是框架的"练兵场"：它们各自实现一个有实际意义的小型真实应用（任务看板、支出账本、阅读清单、库存预留），覆盖 WinForms、Console、WPF、ASP.NET Core 四类典型宿主形态。Agent 在其上持续工作——用 Puppet 端点模拟真实用户操作、观测状态、发现问题——即可逐步覆盖对应类型程序设计的方方面面，并把经验沉淀在各项目自己的 `AGENTS.md` / `README.md` / `DEVELOPMENT.md` 中，反过来驱动框架修复与演进。原则：业务代码保持优雅、清晰、简洁、面向人类审美的美观易用；框架改动必须由可复现的问题证据驱动，不投机性加功能。
 
 ### 快速开始
 
@@ -116,9 +123,16 @@ Puppet.Core enables agents to **automatically debug applications** — specifica
 
 | Project | Description |
 | ------- | ----------- |
-| Puppet.Core | Generic core: interfaces, serialization, capability description, registry, web endpoints, built-in web server, usage logging |
+| Puppet.Core | Generic core: interfaces, serialization, capability description, registry, web endpoints, built-in web server, usage logging, console process diagnostics |
 | Puppet.Core.WinForms | WinForms support: control-tree traversal, Click / Text / Select operations |
-| Puppet.Core.Console | Console support: process state, stdin/stdout |
+| TestGround.Winform | WinForms workbench (task board): standing lab for framework self-debugging and evolution |
+| TestGround.Console | Console workbench (expense ledger): integration and verification lab for command-line hosts |
+| TestGround.Wpf | WPF workbench (reading list): data-binding and Dispatcher scenario lab |
+| TestGround.AspNetCore | ASP.NET Core workbench (inventory reservations): web service and concurrency lab |
+
+### TestGround: self-debugging and evolution labs
+
+The four TestGround apps are the framework's training grounds. Each implements a small but genuinely useful application (task board, expense ledger, reading list, inventory reservations) covering four typical host shapes: WinForms, Console, WPF, and ASP.NET Core. By continuously working on them — simulating real user actions through Puppet endpoints, observing state, and surfacing issues — agents progressively cover the design landscape of each app type and distill experience into each project's own `AGENTS.md` / `README.md` / `DEVELOPMENT.md`, which in turn drives framework fixes and evolution. Principles: app code stays elegant, clear, concise, and pleasant for humans; framework changes must be driven by reproducible evidence, never speculative features.
 
 ### Quick Start
 

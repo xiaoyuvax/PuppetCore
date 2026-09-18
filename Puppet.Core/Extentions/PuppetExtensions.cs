@@ -14,6 +14,22 @@ namespace Puppet.Core.Extentions
     public static class PuppetExtensions
     {
         /// <summary>
+        /// Agent 协议响应专用序列化设置：强制包含 null 字段。
+        /// 宿主项目全局序列化设置常为 NullValueHandling.Ignore（如 Wima.Core.Utils），
+        /// 会让 GetProperty/SetProperty 的 value:null/type:null 被剥离，Agent 端无法区分
+        /// "字段不存在"与"值为 null"。协议响应统一用本设置序列化，与宿主设置解耦。
+        /// </summary>
+        private static readonly JSN.JsonSerializerSettings AgentResponseSettings = new()
+        {
+            NullValueHandling = JSN.NullValueHandling.Include,
+            ReferenceLoopHandling = JSN.ReferenceLoopHandling.Ignore,
+        };
+
+        /// <summary>Agent 协议响应序列化（强制包含 null 字段，见 AgentResponseSettings）</summary>
+        private static string ToAgentJson(object obj)
+            => JSN.JsonConvert.SerializeObject(obj, AgentResponseSettings);
+
+        /// <summary>
         /// 获取运行时状态值（路径查询为主，可 include/exclude）。
         /// path 示例：$.Text 或 $.controls[?(@.name=='btnStart')] 或 $.scenes[0].name
         /// 语法统一到 JSONPath（RFC 9535），支持有序集合（数组 [i]）和键值对（['key']），任意层级。
@@ -57,7 +73,7 @@ namespace Puppet.Core.Extentions
             {
                 json = (string)RunOnUi(target, () => JsonConvert.SerializeObject(target, settings));
             }
-            catch (Exception ex) { return Utils.ToJson(new { ok = false, err = ex.Message }); }
+            catch (Exception ex) { return ToAgentJson(new { ok = false, err = ex.Message }); }
 
             if (!string.IsNullOrEmpty(jsonPath))
             {
@@ -68,7 +84,7 @@ namespace Puppet.Core.Extentions
                 }
                 catch (Exception ex)
                 {
-                    return Utils.ToJson(new { ok = false, err = $"jsonpath error: {ex.Message}" });
+                    return ToAgentJson(new { ok = false, err = $"jsonpath error: {ex.Message}" });
                 }
             }
             return json;
@@ -125,9 +141,9 @@ namespace Puppet.Core.Extentions
             var type = target.GetType();
             var method = ResolveMethod(type, methodName, args);
 
-            if (method == null) return Utils.ToJson(new { ok = false, err = "method not found" });
+            if (method == null) return ToAgentJson(new { ok = false, err = "method not found" });
             if (method.GetCustomAttribute<PuppetIgnoreAttribute>() != null)
-                return Utils.ToJson(new { ok = false, err = "method not accessible" });
+                return ToAgentJson(new { ok = false, err = "method not accessible" });
 
             PuppetUsage.Track($"invoke::{methodName}", $"{target.AgentInstanceName}.{methodName}(args={args?.Length})");
 
@@ -155,7 +171,7 @@ namespace Puppet.Core.Extentions
                     }
                 }
 
-                return Utils.ToJson(new { ok = true, result = retVal, returnType = method.ReturnType?.FullName });
+                return ToAgentJson(new { ok = true, result = retVal, returnType = method.ReturnType?.FullName });
             }
             catch (Exception ex)
             {
@@ -164,7 +180,7 @@ namespace Puppet.Core.Extentions
                 var (msg, stack) = ex is System.Reflection.TargetInvocationException tie
                     ? (tie.InnerException?.Message ?? tie.Message, tie.InnerException?.StackTrace ?? tie.StackTrace)
                     : (ex.Message, ex.StackTrace);
-                return Utils.ToJson(new { ok = false, err = msg, stack });
+                return ToAgentJson(new { ok = false, err = msg, stack });
             }
         }
 
@@ -420,7 +436,7 @@ namespace Puppet.Core.Extentions
         public static string SetProperty(this IPuppet target, string path, object value)
         {
             if (string.IsNullOrEmpty(path))
-                return Utils.ToJson(new { ok = false, err = "path is empty" });
+                return ToAgentJson(new { ok = false, err = "path is empty" });
 
             var parts = path.Split('.');
             object current = target;
@@ -433,10 +449,10 @@ namespace Puppet.Core.Extentions
                 {
                     var (val, typ, err) = ResolvePathPart(current, type, parts[i]);
                     if (err != null)
-                        return Utils.ToJson(new { ok = false, err = err });
+                        return ToAgentJson(new { ok = false, err = err });
                     current = val;
                     if (current == null)
-                        return Utils.ToJson(new { ok = false, err = $"property '{parts[i]}' is null" });
+                        return ToAgentJson(new { ok = false, err = $"property '{parts[i]}' is null" });
                     type = typ;
                 }
 
@@ -450,16 +466,16 @@ namespace Puppet.Core.Extentions
                     {
                         var preMember = ResolveMember(type, propName);
                         if (!preMember.IsFound())
-                            return Utils.ToJson(new { ok = false, err = $"property '{propName}' not found on {type.Name}" });
+                            return ToAgentJson(new { ok = false, err = $"property '{propName}' not found on {type.Name}" });
                         current = preMember.GetValue(current);
                         if (current == null)
-                            return Utils.ToJson(new { ok = false, err = $"property '{propName}' is null" });
+                            return ToAgentJson(new { ok = false, err = $"property '{propName}' is null" });
                         type = current.GetType();
                     }
                     var indexStr = lastPart.Substring(lastBracket + 1, lastPart.Length - lastBracket - 2);
                     var (indexed, idxType, idxErr) = ResolveIndex(current, type, indexStr);
                     if (idxErr != null)
-                        return Utils.ToJson(new { ok = false, err = idxErr });
+                        return ToAgentJson(new { ok = false, err = idxErr });
 
                     // 类型转换
                     object val = value;
@@ -483,18 +499,18 @@ namespace Puppet.Core.Extentions
                         RunOnUi(current, () => { setDict[key] = val; return null; });
                     }
                     else
-                        return Utils.ToJson(new { ok = false, err = $"type '{type.Name}' does not support index setting" });
+                        return ToAgentJson(new { ok = false, err = $"type '{type.Name}' does not support index setting" });
 
-                    return Utils.ToJson(new { ok = true, path = path, value = val, propType = idxType?.FullName });
+                    return ToAgentJson(new { ok = true, path = path, value = val, propType = idxType?.FullName });
                 }
                 else
                 {
                     // 普通属性/字段
                     var lastMember = ResolveMember(type, lastPart);
                     if (!lastMember.IsFound())
-                        return Utils.ToJson(new { ok = false, err = $"property '{lastPart}' not found on {type.Name}" });
+                        return ToAgentJson(new { ok = false, err = $"property '{lastPart}' not found on {type.Name}" });
                     if (!lastMember.CanWrite)
-                        return Utils.ToJson(new { ok = false, err = $"property '{lastPart}' is read-only" });
+                        return ToAgentJson(new { ok = false, err = $"property '{lastPart}' is read-only" });
 
                     // 类型转换
                     object val = value;
@@ -507,7 +523,7 @@ namespace Puppet.Core.Extentions
                     // WinForm 控件线程安全：UI 属性必须在 UI 线程设置
                     RunOnUi(current, () => { lastMember.SetValue(current, val); return null; });
 
-                    return Utils.ToJson(new { ok = true, path = path, value = val, propType = propType.FullName });
+                    return ToAgentJson(new { ok = true, path = path, value = val, propType = propType.FullName });
                 }
             }
             catch (Exception ex)
@@ -516,7 +532,7 @@ namespace Puppet.Core.Extentions
                 var msg = ex is System.Reflection.TargetInvocationException tie
                     ? (tie.InnerException?.Message ?? tie.Message)
                     : ex.Message;
-                return Utils.ToJson(new { ok = false, err = msg });
+                return ToAgentJson(new { ok = false, err = msg });
             }
         }
 
@@ -530,7 +546,7 @@ namespace Puppet.Core.Extentions
         public static string GetProperty(this IPuppet target, string path)
         {
             if (string.IsNullOrEmpty(path))
-                return Utils.ToJson(new { ok = false, err = "path is empty" });
+                return ToAgentJson(new { ok = false, err = "path is empty" });
 
             var parts = path.Split('.');
             object navResult = null;
@@ -568,21 +584,21 @@ namespace Puppet.Core.Extentions
                 RunOnUi(target, () => { DoNavigate(); return null; });
 
                 if (navError != null)
-                    return Utils.ToJson(new { ok = false, err = navError });
+                    return ToAgentJson(new { ok = false, err = navError });
 
                 // null 值直接返回（Agent 可据此区分"未加载"与"已加载"）
                 if (navResult == null)
-                    return Utils.ToJson(new { ok = true, path = path, value = (object)null, type = navType });
+                    return ToAgentJson(new { ok = true, path = path, value = (object)null, type = navType });
 
                 // 简单类型可直接序列化（基本类型、字符串、枚举、日期、Guid 等），无跨线程风险
                 var resultType = navResult.GetType();
                 if (IsSimpleType(resultType))
-                    return Utils.ToJson(new { ok = true, path = path, value = navResult, type = navType });
+                    return ToAgentJson(new { ok = true, path = path, value = navResult, type = navType });
 
                 // 复杂对象：不序列化整个对象图。FileMan/Form/WebView2 等对象含跨线程不可访问成员，
                 // 在 web 线程序列化会触发跨线程异常或访问已释放原生资源导致进程崩溃。
                 // 返回类型信息，Agent 通过更深路径（如 'path.MemberName'）查询具体值。
-                return Utils.ToJson(new { ok = true, path = path, value = (object)null, type = navType, note = "complex object; query a deeper path (e.g. '" + path + ".<member>') to inspect specific members" });
+                return ToAgentJson(new { ok = true, path = path, value = (object)null, type = navType, note = "complex object; query a deeper path (e.g. '" + path + ".<member>') to inspect specific members" });
             }
             catch (Exception ex)
             {
@@ -590,7 +606,7 @@ namespace Puppet.Core.Extentions
                 var msg = ex is System.Reflection.TargetInvocationException tie
                     ? (tie.InnerException?.Message ?? tie.Message)
                     : ex.Message;
-                return Utils.ToJson(new { ok = false, err = msg });
+                return ToAgentJson(new { ok = false, err = msg });
             }
         }
 

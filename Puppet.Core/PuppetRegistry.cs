@@ -188,9 +188,15 @@ namespace Puppet.Core
         /// <summary>
         /// 在注册线程（通常是 UI 线程）捕获上下文。
         /// 仅当当前线程存在 SynchronizationContext 时捕获（Web/线程池线程的 Current 为 null，不会覆盖 UI 上下文）。
+        /// 只认首个捕获：全局 fallback 上下文必须是主 UI 线程。若在其它拥有消息泵的线程（如
+        /// 独立线程托管的编辑器窗体）上注册时覆盖捕获，此后所有经 fallback 的 marshal 都会
+        /// 投递到该线程：主线程窗体成员的读取被迫跨线程 SendMessage，与目标线程自身的 marshal
+        /// 等待相互交叉时形成死锁（转储证据：主线程卡在 marshal 回调的 GetWindowTextLength）。
+        /// 各窗体自身的线程亲和已由 RunOnUi 的 ISynchronizeInvoke 分支正确处理，无需在此覆盖。
         /// </summary>
         public static void Capture()
         {
+            if (_context != null) return; // 首个（主 UI 线程）获胜，禁止后续异线程覆盖
             var ctx = SynchronizationContext.Current;
             if (ctx == null) return;
             _context = ctx;

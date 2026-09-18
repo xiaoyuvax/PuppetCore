@@ -24,11 +24,11 @@
 
 ## 子项目
 
-* Puppet.Core：通用核心（接口、序列化、描述、注册表、Web 端点、内建 Web 服务器、使用日志）
+* Puppet.Core：通用核心（接口、序列化、描述、注册表、Web 端点、内建 Web 服务器、使用日志、Console 进程诊断）
 
 * Puppet.Core.WinForms：WinForm 专用（控件树遍历、控件操作 Click/Text/Select）
 
-* Puppet.Core.Console：Console 专用（进程状态、stdin/stdout）
+Console 诊断扩展位于 `Puppet.Core/Extentions/ConsolePuppetExtensions.cs`，使用 `Puppet.Core.Extentions` 命名空间；仅描述进程状态，不提供 stdin/stdout 交互或环境变量枚举。原 `Puppet.Core.Console` 独立项目及包已移除，不保留旧命名空间；调用方只需引用 `Puppet.Core` 并更新 using。
 
 ## 核心接口
 
