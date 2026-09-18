@@ -1,16 +1,16 @@
 using System.Diagnostics;
 using Wima.Core;
 
-namespace Puppet.Core.Console
+namespace Puppet.Core.Extentions
 {
     /// <summary>
     /// Console 应用 Agent 扩展方法。
-    /// 提供 Console 进程状态描述（进程信息、环境变量、命令行参数、uptime、内存）。
+    /// 提供 Console 进程状态描述（进程信息、命令行参数、uptime、内存）。
     /// Agent 若需向 Console 程序发送命令，请通过 /agent/invoke 调用公共方法。
     /// </summary>
     public static class ConsoleAgentExtensions
     {
-        /// <summary>Console 状态：进程信息、环境变量、命令行参数、退出码、uptime、内存</summary>
+        /// <summary>Console 状态：进程信息、命令行参数、退出码、uptime、内存</summary>
         /// <param name="host">实现 IPuppet 的宿主实例</param>
         public static string DescribeConsoleState(this IPuppet host)
         {

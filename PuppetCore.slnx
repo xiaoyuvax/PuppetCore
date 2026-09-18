@@ -1,5 +1,8 @@
 <Solution>
-  <Project Path="Puppet.Core.Console/Puppet.Core.Console.csproj" />
-  <Project Path="Puppet.Core.WinForms/Puppet.Core.WinForms.csproj" />
   <Project Path="Puppet.Core/Puppet.Core.csproj" />
+  <Project Path="Puppet.Core.WinForms/Puppet.Core.WinForms.csproj" />
+  <Project Path="TestGround.Winform/TestGround.Winform.csproj" />
+  <Project Path="TestGround.Console/TestGround.Console.csproj" />
+  <Project Path="TestGround.Wpf/TestGround.Wpf.csproj" />
+  <Project Path="TestGround.AspNetCore/TestGround.AspNetCore.csproj" />
 </Solution>
