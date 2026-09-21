@@ -40,6 +40,7 @@ namespace Puppet.Core
                 SupportsSiteLock = true,
                 SupportsLogForwarder = true,
                 SupportsMultiAgent = true,
+                SupportsAppAgent = true, // v1.0 双面向：面向 B（/appagent/*）框架级支持；是否启用由宿主 UseAppAgent 决定
                 TargetFramework = GetTargetFramework(asm),
                 BuildConfiguration = GetBuildConfiguration(asm)
             };
@@ -105,5 +106,7 @@ namespace Puppet.Core
         public bool SupportsLogForwarder { get; set; }
         /// <summary>支持多 Agent 共存</summary>
         public bool SupportsMultiAgent { get; set; }
+        /// <summary>支持面向 B（用户 Agent 操作接口 /appagent/*，提案 DUAL-ASPECT-PROPOSAL v1.0）</summary>
+        public bool SupportsAppAgent { get; set; }
     }
 }

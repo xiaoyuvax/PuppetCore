@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Routing;
 using Puppet.Core;
+using Puppet.Core.AppAgent;
 using Puppet.Core.Usage;
 using Puppet.Core.Web;
 using Wima.Log;
@@ -108,6 +109,12 @@ internal static class Program
                         return true;
                     }
                     return false;
+                });
+                // 模式 C：独立 PuppetWebServer 上启用面向 B（CLI 式宿主，无 UI 线程，无 L1 文案桥）
+                agent.UseAppAgent(o =>
+                {
+                    o.ProductName = "Inventory";
+                    o.BlockAgentEndpoints = false; // 双服务器双面向并存演示
                 });
                 if (!agent.Start("127.0.0.1:19104")) throw new InvalidOperationException("Agent server start failed.");
             }

@@ -120,7 +120,187 @@ internal static class SelfTest
             Check(form.CompletedCount == 1, "HTTP native button operation");
         }
         Check(form.RemoveSelectedTask() && form.TotalCount == 0, "HTTP scenario cleanup");
+
+        await RunAppAgentAsync(form);
     }
+
+    /// <summary>
+    /// 面向 B（/appagent/*）锁定测试：发现（L0 档案 + L1 探针 + L2 手册）→ 凭证分层 → manifest 范式与三层文案 →
+    /// 按名传参严格校验 → 实例串行 409 → Task&lt;bool&gt; 解包 → 产物下载 → 错误契约。
+    /// 全程走真实用户 Agent 发现路径（枚举 %LOCALAPPDATA% 档案取凭证），不依赖任何测试钩子。
+    /// </summary>
+    private static async Task RunAppAgentAsync(TaskBoardForm form)
+    {
+        // ---- L0 发现：枚举档案目录（用户 Agent 的真实路径） ----
+        var profileDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Puppet.AppAgents");
+        var profileFile = Directory.GetFiles(profileDir, "小步任务看板.*.json")
+            .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault()
+            ?? throw new InvalidOperationException("discovery profile file missing (L0)");
+        using var profileDoc = JsonDocument.Parse(await File.ReadAllTextAsync(profileFile));
+        var profile = profileDoc.RootElement;
+        var key = profile.GetProperty("key").GetString();
+        var endpoint = profile.GetProperty("endpoint").GetString();
+        Check(endpoint == "http://127.0.0.1:19101", "L0 profile endpoint");
+
+        var client = new HttpClient { BaseAddress = new Uri(endpoint), Timeout = TimeSpan.FromSeconds(15) };
+        try
+        {
+            // ---- L1 探针 + L2 手册：无凭证可达，最小披露（不含能力细节） ----
+            using (var probe = await client.GetAsync("/appagent/probe"))
+            {
+                probe.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await probe.Content.ReadAsStringAsync());
+                Check(doc.RootElement.GetProperty("puppet").GetBoolean()
+                    && doc.RootElement.GetProperty("protocol").GetString() == "appagent/1.0"
+                    && doc.RootElement.GetProperty("help").GetString() == "/appagent/help"
+                    && !doc.RootElement.TryGetProperty("actions", out _), "L1 probe minimal disclosure");
+            }
+            using (var help = await client.GetAsync("/appagent/help"))
+            {
+                help.EnsureSuccessStatusCode();
+                Check((await help.Content.ReadAsStringAsync()).Contains("/appagent/manifest", StringComparison.Ordinal), "L2 self-describing help");
+            }
+
+            // ---- 凭证分层：能力目录必须持档案凭证（与 A 的 404 静默刻意不同：B 是公开协议，凭证明示） ----
+            using (var denied = await client.GetAsync("/appagent/manifest"))
+                Check(denied.StatusCode == HttpStatusCode.Unauthorized, "manifest requires credential");
+            using (var bad = new HttpRequestMessage(HttpMethod.Get, "/appagent/manifest"))
+            {
+                bad.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "not-the-key");
+                using var rejected = await client.SendAsync(bad);
+                Check(rejected.StatusCode == HttpStatusCode.Unauthorized, "wrong credential rejected");
+            }
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+
+            // ---- manifest：范式自动收录 + 覆盖收录 + 三层文案 + L1 原始文案图 + 并发契约 ----
+            using (var manifest = await client.GetAsync("/appagent/manifest"))
+            {
+                manifest.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await manifest.Content.ReadAsStringAsync());
+                var root = doc.RootElement;
+                Check(root.GetProperty("productName").GetString() == "小步任务看板", "manifest product name");
+                Check(root.GetProperty("concurrency").GetProperty("actionExecution").GetString() == "serialized-per-instance", "manifest concurrency contract");
+                var actions = root.GetProperty("actions").EnumerateArray().ToArray();
+                var actionNames = actions.Select(a => a.GetProperty("name").GetString()).ToHashSet(StringComparer.Ordinal);
+                Check(actionNames.Contains("AddTask") && actionNames.Contains("CompleteSelectedTask")
+                    && actionNames.Contains("RenameSelectedTask") && actionNames.Contains("SetFilter"), "actionize pattern members");
+                Check(actionNames.Contains("ExportSummary"), "attribute override member (int return)");
+                Check(actionNames.Contains("SlowMarkdown"), "async anchor Task<bool>");
+                Check(!actionNames.Contains("Report") && !actionNames.Contains("ToString"), "internals excluded");
+                Check(!actionNames.Contains("ClearCompletedTasks"), "non-anchor int return excluded without override");
+                var addTask = actions.First(a => a.GetProperty("name").GetString() == "AddTask");
+                Check(addTask.GetProperty("desc").GetString() == "Add Task", "L3 inferred description (AddTask)");
+                Check(addTask.GetProperty("parameters").EnumerateArray()
+                    .Any(p => p.GetProperty("name").GetString() == "title" && p.GetProperty("required").GetBoolean()), "title parameter required");
+                var export = actions.First(a => a.GetProperty("name").GetString() == "ExportSummary");
+                Check(export.GetProperty("desc").GetString() == "导出当前看板摘要文本文件", "L2 explicit description (attribute)");
+                Check(root.GetProperty("uiTexts").GetProperty("AddButton").GetString() == "添加", "L1 raw control text map");
+            }
+
+            // ---- 按名严格绑定：未知参数 400 / 缺必填 400 / 未知 action 404 ----
+            // 注意：不用 PostAsJsonAsync 传相对 URI——其 UriKind.RelativeOrAbsolute 解析会把 action 名小写化，路径须逐字保留
+            using (var unknown = await client.PostAsync("/appagent/actions/AddTask", JsonBody(new { args = new { titel = "x" } })))
+                Check(unknown.StatusCode == HttpStatusCode.BadRequest, $"unknown parameter name 400 (got {(int)unknown.StatusCode}: {await unknown.Content.ReadAsStringAsync()})");
+            using (var missing = await client.PostAsync("/appagent/actions/AddTask", JsonBody(new { args = new { } })))
+                Check(missing.StatusCode == HttpStatusCode.BadRequest, $"missing required parameter 400 (got {(int)missing.StatusCode}: {await missing.Content.ReadAsStringAsync()})");
+            using (var notFound = await client.PostAsync("/appagent/actions/Nope", JsonBody(new { args = new { } })))
+                Check(notFound.StatusCode == HttpStatusCode.NotFound, $"action not found 404 (got {(int)notFound.StatusCode}: {await notFound.Content.ReadAsStringAsync()})");
+
+            // ---- 按名传参执行：ok 信封 + callId 回显 ----
+            using (var call = await client.PostAsJsonAsync("/appagent/actions/AddTask",
+                new { args = new { title = "Agent 代办", priority = "高" }, callId = "selftest-b-1" }))
+            {
+                call.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await call.Content.ReadAsStringAsync());
+                Check(doc.RootElement.GetProperty("ok").GetBoolean()
+                    && doc.RootElement.GetProperty("action").GetString() == "AddTask"
+                    && doc.RootElement.GetProperty("callId").GetString() == "selftest-b-1", "action envelope");
+            }
+            Check(form.TotalCount == 1 && form.SelectedTitle == "Agent 代办" && form.SelectedPriority == "高", "action marshals to UI (by-name binding)");
+
+            // ---- 可选参数省略 → 默认值"普通" ----
+            using (var call = await client.PostAsJsonAsync("/appagent/actions/AddTask", new { args = new { title = "默认优先级" } }))
+            {
+                call.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await call.Content.ReadAsStringAsync());
+                Check(doc.RootElement.GetProperty("ok").GetBoolean(), "optional parameter omitted");
+            }
+            Check(form.SelectedPriority == "普通", "default parameter value applied");
+
+            // ---- 业务拒绝：false 结果与 hint（不落库） ----
+            using (var rejected = await client.PostAsJsonAsync("/appagent/actions/AddTask", new { args = new { title = " " } }))
+            {
+                rejected.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync());
+                Check(!doc.RootElement.GetProperty("ok").GetBoolean()
+                    && doc.RootElement.GetProperty("hint").GetString()!.Length > 0, "business rejection with hint");
+            }
+            Check(form.TotalCount == 2, "rejected action left no state");
+
+            // ---- 实例级强制串行：占住执行锁后再调用 → 409 busy + retryAfterMs（BusyWaitMs=200） ----
+            var blocker = client.PostAsJsonAsync("/appagent/actions/SlowMarkdown", new { args = new { milliseconds = 900 } });
+            await Task.Delay(150); // blocker 已持有实例锁（SlowMarkdown 于 UI 线程执行中）
+            using (var busy = await client.PostAsync("/appagent/actions/ExportSummary",
+                new StringContent("{}", System.Text.Encoding.UTF8, "application/json")))
+            {
+                Check(busy.StatusCode == HttpStatusCode.Conflict, "instance serialized");
+                using var doc = JsonDocument.Parse(await busy.Content.ReadAsStringAsync());
+                Check(doc.RootElement.GetProperty("code").GetString() == "instance-busy"
+                    && doc.RootElement.GetProperty("retryAfterMs").GetInt32() == 200, "409 busy contract with retryAfterMs");
+            }
+            using (var blocked = await blocker)
+            {
+                blocked.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await blocked.Content.ReadAsStringAsync());
+                Check(doc.RootElement.GetProperty("ok").GetBoolean(), "Task<bool> unwrapped after serialization");
+            }
+            Check(form.TotalCount == 2, "serial queue preserved state");
+
+            // ---- 产物通道：ExportSummary → asset URL → 凭证下载（内存态模拟磁盘文件） ----
+            using (var export = await client.PostAsync("/appagent/actions/ExportSummary",
+                new StringContent("{}", System.Text.Encoding.UTF8, "application/json")))
+            {
+                export.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await export.Content.ReadAsStringAsync());
+                var assetUrl = doc.RootElement.GetProperty("asset").GetString();
+                Check(assetUrl != null && assetUrl.StartsWith("/appagent/assets/", StringComparison.Ordinal), "artifact asset url");
+                using var download = await client.GetAsync(assetUrl);
+                download.EnsureSuccessStatusCode();
+                var bytes = await download.Content.ReadAsByteArrayAsync();
+                var cd = download.Content.Headers.ContentDisposition;
+                var fileName = (cd.FileNameStar ?? cd.FileName)?.Trim('"');
+                Check(download.Content.Headers.ContentType!.MediaType == "text/plain"
+                    && fileName == "summary.txt"
+                    && System.Text.Encoding.UTF8.GetString(bytes).Contains("任务看板摘要", StringComparison.Ordinal), "asset download with content type");
+                using var noAsset = await client.GetAsync(assetUrl + "-zz");
+                Check(noAsset.StatusCode == HttpStatusCode.NotFound, "asset not found 404");
+            }
+
+            // ---- state 直读 + 错误契约（state-not-found 带 hint） ----
+            using (var state = await client.GetAsync("/appagent/state/TotalCount"))
+            {
+                state.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await state.Content.ReadAsStringAsync());
+                Check(doc.RootElement.GetProperty("key").GetString() == "TotalCount"
+                    && doc.RootElement.GetProperty("value").GetInt32() == 2, "state scalar read");
+            }
+            using (var noState = await client.GetAsync("/appagent/state/SecretInternalThing"))
+                Check(noState.StatusCode == HttpStatusCode.NotFound, "state not found 404");
+
+            // ---- 清场（B 场景数据不残留） ----
+            Check(form.SelectTask(0) && form.RemoveSelectedTask()
+                && form.SelectTask(0) && form.RemoveSelectedTask() && form.TotalCount == 0, "appagent scenario cleanup");
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    /// <summary>action 调用体（POST 相对路径用 StringContent，防 System.Net.Http.Json 相对 URI 小写化坑）</summary>
+    private static StringContent JsonBody(object payload) =>
+        new(System.Text.Json.JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
 
     private static void Check(bool condition, string scenario)
     {

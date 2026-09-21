@@ -47,7 +47,9 @@ public sealed class Inventory : IPuppet
         }
     }
 
+    /// <summary>模式 C 演示：复杂返回类型（范式外）以 [PuppetAction] 覆盖收录进 B 面向，name 采用动词小写契约</summary>
     [PuppetExpose]
+    [Puppet.Core.AppAgent.PuppetAction("reserve", Desc = "Reserve stock by SKU")]
     public Reservation Reserve(string sku, int quantity)
     {
         ValidateSku(sku);
@@ -65,6 +67,7 @@ public sealed class Inventory : IPuppet
     }
 
     [PuppetExpose]
+    [Puppet.Core.AppAgent.PuppetAction("release", Desc = "Release a reservation by id")]
     public Reservation Release(Guid id)
     {
         if (id == Guid.Empty) throw new ArgumentException("Reservation ID must be a nonempty UUID.");

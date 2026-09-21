@@ -25,6 +25,12 @@ namespace Puppet.Core
         private static readonly object _compactLock = new();
         private static int _accessCount;
 
+        /// <summary>实例注册后触发（UI 线程居多）。供 AppAgentRuntime 动态绑定（opt-in）等订阅。</summary>
+        public static event Action<IPuppet> InstanceRegistered;
+
+        /// <summary>实例注销后触发（按名）。与 Disposed → Unregister 闭环，供动态绑定移除强引用。</summary>
+        public static event Action<string> InstanceUnregistered;
+
         /// <summary>注册实例（默认公开）</summary>
         public static void Register(IPuppet instance)
             => Register(instance, tags: null, internalOnly: false);
@@ -48,12 +54,17 @@ namespace Puppet.Core
             };
             CompactIfNeeded();
             PuppetUsage.Track("registration", $"{name} type={instance.GetType().Name} internalOnly={internalOnly}");
+            InstanceRegistered?.Invoke(instance);
         }
 
         /// <summary>注销实例</summary>
         public static void Unregister(string name)
         {
-            if (name != null) _instances.TryRemove(name, out _);
+            if (name != null)
+            {
+                _instances.TryRemove(name, out _);
+                InstanceUnregistered?.Invoke(name);
+            }
         }
 
         /// <summary>更新实例活跃时间（Agent 调用后或实例状态变化时调用）</summary>

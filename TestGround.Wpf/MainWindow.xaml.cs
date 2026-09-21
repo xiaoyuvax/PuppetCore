@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Threading;
 using Puppet.Core;
+using Puppet.Core.AppAgent;
 using Puppet.Core.Web;
 
 namespace TestGround.Wpf;
@@ -48,7 +49,8 @@ public partial class MainWindow : Window
         PuppetKeyVault.SetKey(key);
         try
         {
-            _server = new PuppetWebServer();
+            // 模式 A 宿主（外部无 WebServerBase 的 WPF）同样可启用面向 B：无 WinForms 包则无 L1 文案桥，desc 走 L3 推断
+            _server = new PuppetWebServer().UseAppAgent(o => o.ProductName = "阅读书架");
             _model.SetAgentStatus(_server.Start("127.0.0.1:19103")
                 ? "Puppet · 127.0.0.1:19103 · ReadingList"
                 : "Puppet 启动失败；本地书架仍可使用。");

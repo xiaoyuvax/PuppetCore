@@ -381,6 +381,153 @@ public void RefreshData() { ... }
 
 * **注册时机**：窗体在**构造时**注册到注册表（`Disposed → Unregister`）。查询可用实例先 `/agent/registry`。
 
+## 面向 B：用户 Agent 操作接口（/appagent/*）
+
+Puppet.Core 双面向：**A. Agent 自调试**（`/agent/*`，上述全部章节）与 **B. 用户 Agent 操作接口**（`/appagent/*`，本节）——一套内核，两个门面，按需启用。A 面向开发期调试（Agent 拥有源码）；B 面向成品应用（终端用户的个人 Agent 经授权代理操作，应用已编译发布，Agent 不可能改代码）。**不启用 B 时零代码路径、零行为差异。**
+
+### 启用与端点
+
+```csharp
+// WinForms（自动挂接 L1 UI 文案桥）：
+new PuppetWebServer().UseFormControls().UseAppAgentWithUiText(o =>
+{
+    o.ProductName = "小步看板";
+    o.BlockAgentEndpoints = true;  // B-only 成品建议开启（Paranoid，/agent/* 一律 404）
+}).Start("127.0.0.1:9090");
+```
+
+**动态实例绑定**（`o.DynamicBinding = true`，默认关）：编辑器类 WinForms 宿主的窗体多在运行期创建
+（启动快照必然缺失）。开启后新注册的 IPuppet 实例自动进绑定表（按名去重替换），注销自动移除；
+manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修订）。开发期宿主建议开启。
+
+| 端点 | 凭证 | 说明 |
+|------|------|------|
+| `GET /appagent/probe` | 无 | 探针：`{puppet, protocol, auth, authHint, help}` 最小披露 |
+| `GET /appagent/help` | 无 | 自描述手册（CLI `--help` 等价物） |
+| `GET /appagent/manifest` | **Bearer** | 能力目录：app/actions/state/uiTexts/concurrency |
+| `POST /appagent/actions/{name}` | **Bearer** | 执行动作，body `{"args":{按名传参},"callId":"uuid"}` |
+| `GET /appagent/state/{key}` | **Bearer** | 简单类型状态直读（文本聊天视图） |
+| `GET /appagent/assets/{id}` | **Bearer** | 产物下载（内存态模拟磁盘文件） |
+
+**发现（三级，零手动配置）**：L0 枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json`（{app, endpoint, key, protocol}，用户档案 ACL 隔离——RDP 其他用户/远程读不到即拒绝，OS 用户隔离代行授权）；L1 扫描端口 + probe；L2 读 help。用户只需说“访问本地 9090 端口了解详情”。
+
+### Actionize 范式（无需逐个标注）
+
+动作方法自动收录 = **正面形状**（public 实例方法、DeclaredOnly、非 special name/override/static/泛型）+ **语义锚点**（返回 `bool` / `OperationResult` / `Task<bool>` / `Task<OperationResult>`——成败可观察）+ **负面排除**（`[PuppetIgnore]` 永远赢 / out·ref 参数 / `Is`·`Can`·`Has`·`Should` 谓词前缀）。状态属性自动收录 = public + 简单类型（基本类型/字符串/枚举/日期/Guid）。范式外成员用覆盖特性补漏：`[PuppetAction(Name,Desc)]`、`[PuppetState(Name,Desc)]`、`[PuppetParam(Desc,Sensitive)]`、`[PuppetAppInfo(Name,Version,Vendor)]`（类或程序集级）。
+
+**文案三层同源**（优先级递减）：① `[PuppetAction(Desc=…)]` 显式；② L1 UI 同源——WinForms 桥扫描控件树取 AccessibleName > Text（剥离 & 助记符），manifest 的 `uiTexts` 为原始控件文案图；③ L3 方法名拆词（Inferred）。**避免在特性里重写 UI 已有的文案。**
+
+### 面向 B 实施要点（宿主 Agent 须知）
+
+1. **提炼者与实施者 = 开发期 Agent**（即你），人类审定：① 从源码 + A 端点运行时走查归纳**流程树**（含界面未暴露但用户可自然语言要求的内部动作）；② 按需等效重构——事件处理器内联逻辑落为谓词方法（public + bool 返回即自动 Actionize，方法名对应自然语言动作）；**不启用 B 则完全不重构**；③ 范式外的真动作用 `[PuppetAction]` 补漏；④ 验证闭环——走 B 通道黑盒试运行每条 action；⑤ 本节即 spec，随包分发；⑥ **覆盖度扫描**（找出"未覆盖的用户操作"，含死菜单/未提炼/反向不对称三类缺口）见下节《Actionize 覆盖度扫描》。
+2. **契约**：参数严格按名绑定（未知/缺必填 400）；同名重载需 `[PuppetAction(Name=…)]` 区分；动作在**实例级强制串行**下执行（busy 时 409 `{code:"instance-busy",retryAfterMs}`）；`Task<T>` 自动解包；响应结果形状——bool→ok、`OperationResult`→ok/message/data、**范式外成员（`[PuppetAction]` 收录）返回 null → `ok:false`**（未产出结果，如重名守卫 return null；纯 `Task` 与已提取产物除外）、标量返回值（计数/名称等）进 `data` 供 Agent 核对、复杂类型不序列化；action 返回 `PuppetArtifact(fileName, contentType, bytes)` 时响应携带 `asset` URL，Agent 应**立即下载**（默认 TTL 10 分钟、总量 256MB、单条目 100MB，`AssetTtlMs/AssetTotalBytes/AssetMaxEntryBytes` 可配）；所有错误统一 `{ok:false, code, err, hint, retryAfterMs?}`，按 hint 行动。
+3. **并发协调**：单动作无需加锁（强制串行兜底）；多步原子序列用 A 面向的 SiteLock（协议一致）。
+4. **安全**：本地免交互授权（与 CLI 同信任域，OS 隔离代行）；远程授权（AllowRemote）与审计列二期；B-only 成品发布前检查——`BlockAgentEndpoints=true`、代码中无 `PuppetKeyVault.SetKey("字面量")` 残留、无遗留 `Register()`（防字符串常量被反编译提取）。
+5. 能力探测：`/agent/capabilities` 返回 `supportsAppAgent: true`。
+
+参考实现：`TestGround.Winform`（双面向并存演示：范式自动收录 + `[PuppetAction]` 补漏 + 产物下载 + SelfTest 锁定 A/B 行为）；设计全录见仓库 `DUAL-ASPECT-PROPOSAL.md`（v1.0）。
+
+### Actionize 覆盖度扫描（找出"未覆盖的用户操作"）
+
+> B 通道要求"用户能做的都能被 Agent 做"。但 **Actionize 不是穷举 UI，而是扫描已存在的 public 业务方法**——两者之间有一条缝。本节给出可复现的扫描流程，用于把缝里的缺口找出来。**只做只读扫描，不改宿主行为。**
+
+#### 1. 扫描器的可见范围（先理解为什么会漏）
+
+`ActionizePolicy.Scan(type)` 的输入是**已写好的方法**，不是 UI 控件：
+
+```csharp
+BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly   // 只扫本类 public 实例方法
+    .Where(m => !m.IsSpecialName)                                        // 排除属性访问器
+// 排除：static / 泛型 / override / out|ref 参数 / Is|Can|Has|Should 前缀
+// 要求返回 bool / OperationResult / Task<bool> / Task<OperationResult>，否则须 [PuppetAction] 收录
+// [PuppetIgnore] 永远优先
+```
+
+| 盲区 | 后果 |
+|------|------|
+| 只扫 `public` | 逻辑写在 `private void xxx_Click` → 完全不可见 |
+| 只认成败返回类型 | `void` / `string` / 纯 `Task` 等须手工挂 `[PuppetAction]`，漏挂即漏 |
+| `DeclaredOnly` | 基类（如 `frmRealtimeEditorBase`）上的业务方法不进子类 manifest |
+| 谓词前缀 / `out`·`ref` / 泛型 / override | 命名或签名不合范式的方法被静默丢弃 |
+| `[PuppetIgnore]` | 有意排除（如模态入口） |
+
+**结论**：范式扫描保证"**已写好的** public 业务方法不漏进 manifest"，**不保证**"UI 上所有可点操作**都已写成** public 业务方法"。后者只能靠下面的扫描流程。
+
+#### 2. 缺口的三种形态
+
+| 形态 | 特征 | 处置 |
+|------|------|------|
+| **A 未提炼** | 功能已实现，但只活在 `private *_Click` 里 | 提炼为 `public` + 成败返回（自动收录）；UI handler 只留对话框/通知/光标 |
+| **B 未实现** | UI 有菜单项/按钮，但**根本没有 handler**（死菜单） | 决策：补实现（并 actionize）或删菜单 |
+| **C 反向不对称** | 有 action 但 UI 失效；或 UI 有但 action 缺失 | 对齐两侧 |
+
+#### 3. 扫描流程（可复现）
+
+**Step 1 · 枚举 UI 入口**：Designer 里"有 `Text` 但无 `Click`"的叶子控件 = 候选缺口（容器/状态栏标签除外）。
+
+```powershell
+$f = '<项目>\frmXxx.Designer.cs'
+$decl  = (Select-String $f -Pattern '^\s*(\w+)\.Text = '  -AllMatches) | % { $_.Matches[0].Groups[1].Value }
+$wired = (Select-String $f -Pattern '^\s*(\w+)\.Click \+=' -AllMatches) | % { $_.Matches[0].Groups[1].Value }
+$decl | ? { $wired -notcontains $_ } | Sort-Object -Unique
+```
+
+> 白名单（天然无 `Click`，非缺口）：`menuStrip*`、`kryptonToolStrip*`、`statusStrip*`、`tssl*` / `toolStripStatusLabel*`，以及**带子项的下拉父项**（如 `tsmiSceneID`、`tsmiL3DDiff`）。
+
+**Step 2 · 确认候选是否真死**（`.Click +=` 也可能写在 `.cs` 构造函数/`AddRange` 之后，不在 Designer）：
+
+```powershell
+# 必须限定到该窗体的 .cs + .Designer.cs，避免同名 handler 在别的窗体造成假阳性
+$files = @('<项目>\frmXxx.cs','<项目>\frmXxx.Designer.cs')
+Select-String -LiteralPath $files -Pattern 'tsmiDelScene'        # 看有无 Click 接线
+Select-String -LiteralPath $files -Pattern 'void\s+tsmiDelScene' # 看有无 handler 方法
+```
+
+**Step 3 · 枚举已收录动作**（运行期为准）：
+
+```powershell
+$key = (Get-Content "$env:LOCALAPPDATA\Puppet.AppAgents\<app>.<pid>.json" -Raw | ConvertFrom-Json).key
+(Invoke-RestMethod "http://127.0.0.1:8000/appagent/manifest?name=frmXxx" `
+    -Headers @{Authorization="Bearer $key"}).actions.name
+```
+
+编译期对照：满足第 1 节范式形状的 public 方法 + 带 `[PuppetAction]` 的方法。
+
+**Step 4 · 差分并逐项决策**：
+- UI 有 / action 无 → 形态 A（提炼）或 B（补实现）
+- action 有 / UI 死 → 形态 C（修 UI 或删菜单）
+- 两侧都无但"用户会自然语言要求" → 新增业务方法
+
+**Step 5 · 验证闭环**：每条 action 走 B 通道黑盒试跑（`POST /appagent/actions/{name}`）。注意：`[PuppetAction]` 收录的**范式外成员返回 null → `ok:false`**（语义是"未产出结果"，如重名守卫 `return null`，不是异常）。
+
+#### 4. 扫描时的已知陷阱
+
+- **搜索域必须限定窗体**：同一控件名在不同窗体接线情况可能相反（如 `tsmiDelScene` 在目标编辑器有接线、在 L3D 编辑器没有）；跨文件全仓搜索会给出假阳性计数。
+- **`DeclaredOnly` 盲区**：基类若新增业务方法，子类 manifest 不会出现；扫描时需额外检查基类。
+- **中文参数编码**：B 通道 body 由服务端按 **UTF-8** 解码；PowerShell 5.1 默认按 Latin-1 编码字符串，含中文的 `args` 必须 `-Body ([Text.Encoding]::UTF8.GetBytes($json))`，否则参数值被破坏（表现为"查无此名"返回 `null`）。
+- **密钥分域**：`/appagent/*` 用 B 密钥（`%LOCALAPPDATA%\Puppet.AppAgents\*.json`）；`/agent/*` 用全局/实例密钥（`PuppetKeyVault`）。两者不可混用。
+- **实例名**：`?name=<AgentInstanceName>`，未注册的窗体（窗口未打开）返回 404，不是"动作缺失"。
+
+#### 5. 为什么"要求完整"仍需扫描
+
+范式扫描 + `[PuppetAction]` 只覆盖"**方法层**"，**没有任何编译期/CI 断言把"UI 控件 ↔ action"绑定起来**。所以"完整 actionize"目前是**目标**而非**已验证状态**。要真正闭环，需引入完备性门禁：遍历控件树断言"每个有 `Text` 的叶子控件，要么有 `Click`，要么有同名/对应 action"，并纳入 DEBUG 自检或 CI。
+
+## TestGround 参考工程（仅源码引用模式可用）
+
+> ⚠️ **NuGet 包部署模式下不可用**：TestGround 项目是源码级参考实现，**不随 NuGet 包分发**。NuGet 模式下 Agent 无法直接阅读这些项目源码。
+> Agent 在 NuGet 模式下应依赖：`/agent/docs`（嵌入的本指南）、`/agent/capabilities`、`/agent/describe`、宿主自身源码（Agent 即宿主开发方）。
+
+以下项目位于仓库 `TestGround.*` 目录，仅在**源码引用部署**（本仓库直接 ProjectReference）时可供 Agent 参考：
+
+| 项目 | 集成模式 | 关键演示点 |
+|------|----------|------------|
+| `TestGround.Wpf` | 模式 A（极简注入） | WPF 窗体实现 `IPuppet`，`Register/Unregister`，`PuppetWebHandler.TryHandle` 注入，`[PuppetExpose]` 业务方法，`[PuppetIgnore]` 基础设施 |
+| `TestGround.AspNetCore` | 模式 C（双服务器） | Kestrel + 独立 `PuppetWebServer`，外部 Web 服务器请求类型包装，`UseHandler` 限流/鉴权，`Inventory` 业务状态仅暴露业务方法 |
+| `TestGround.Winform` | 模式 B（内建服务器） | `PuppetWebServer().UseFormControls()`，WinForms 控件树遍历与操作端点 `/agent/control` |
+| `TestGround.Console` | 模式 B（内建服务器） | Console 进程诊断扩展 `Puppet.Core.Extentions`，进程状态描述 |
+
+**参考方式**：Agent 以宿主开发方身份已拥有完整宿主源码，TestGround 仅作集成模式对照。需对照某模式时，阅读对应 `Program.cs` 与 `IPuppet` 实现类。
+
 ## DEBUG 工作流
 
 1. 通读本指南，确认集成模式（优先模式 A）与密钥。

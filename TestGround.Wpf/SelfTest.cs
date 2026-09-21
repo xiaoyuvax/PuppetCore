@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -129,7 +130,77 @@ internal static class SelfTest
             model.PropertyChanged -= observer;
         }
         Console.WriteLine("PASS: authenticated HTTP user operations, validation and dispatcher-to-WPF bindings.");
+
+        await RunAppAgentSmokeAsync(window, model);
     }
+
+    /// <summary>
+    /// B 面向烟雾测试（模式 A 宿主）：WPF 无 WinForms 包 → 无 L1 文案桥，manifest desc 应为 L3 推断；
+    /// 零标注范式收录、按名传参、UI 线程 marshal、state 直读与清场。
+    /// </summary>
+    private static async Task RunAppAgentSmokeAsync(MainWindow window, ReadingList model)
+    {
+        var profileDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Puppet.AppAgents");
+        var profileFile = Directory.GetFiles(profileDir, "阅读书架.*.json")
+            .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault()
+            ?? throw new InvalidOperationException("appagent discovery profile missing (mode A host)");
+        string profileKey;
+        using (var pdoc = JsonDocument.Parse(await File.ReadAllTextAsync(profileFile)))
+            profileKey = pdoc.RootElement.GetProperty("key").GetString()!;
+
+        using var bclient = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:19103"), Timeout = TimeSpan.FromSeconds(10) };
+        using (var probe = await bclient.GetAsync("/appagent/probe"))
+        {
+            probe.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await probe.Content.ReadAsStringAsync());
+            Check(doc.RootElement.GetProperty("puppet").GetBoolean()
+                && doc.RootElement.GetProperty("protocol").GetString() == "appagent/1.0", "appagent probe on mode A host");
+        }
+        bclient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", profileKey);
+        using (var manifest = await bclient.GetAsync("/appagent/manifest"))
+        {
+            manifest.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await manifest.Content.ReadAsStringAsync());
+            var root = doc.RootElement;
+            Check(root.GetProperty("productName").GetString() == "阅读书架", "appagent manifest productName");
+            var names = root.GetProperty("actions").EnumerateArray()
+                .Select(a => a.GetProperty("name").GetString()).ToHashSet(StringComparer.Ordinal);
+            Check(names.Contains("AddBook") && names.Contains("UpdateProgress")
+                && names.Contains("RemoveSelectedBook") && names.Contains("SetFilter"), "zero-annotation actionize on WPF model");
+            var addBook = root.GetProperty("actions").EnumerateArray()
+                .First(a => a.GetProperty("name").GetString() == "AddBook");
+            Check(addBook.GetProperty("desc").GetString() == "Add Book", "L3 inferred description (no WinForms bridge)");
+        }
+        using (var call = await bclient.PostAsync("/appagent/actions/AddBook",
+            JsonBodyB(new { args = new { title = "B 通道书", totalPages = "120" } })))
+        {
+            call.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await call.Content.ReadAsStringAsync());
+            Check(doc.RootElement.GetProperty("ok").GetBoolean(), "appagent AddBook executed");
+        }
+        await FlushAsync(window);
+        Check(model.TotalCount == 1 && model.SelectedTitle == "B 通道书", "appagent mutation visible in WPF bindings");
+        using (var state = await bclient.GetAsync("/appagent/state/TotalCount"))
+        {
+            state.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await state.Content.ReadAsStringAsync());
+            Check(doc.RootElement.GetProperty("value").GetInt32() == 1, "appagent state read");
+        }
+        using (var select = await bclient.PostAsync("/appagent/actions/SelectBook", JsonBodyB(new { args = new { index = 0 } })))
+            select.EnsureSuccessStatusCode();
+        using (var remove = await bclient.PostAsync("/appagent/actions/RemoveSelectedBook", JsonBodyB(new { args = new { } })))
+        {
+            remove.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await remove.Content.ReadAsStringAsync());
+            Check(doc.RootElement.GetProperty("ok").GetBoolean(), "appagent RemoveSelectedBook executed");
+        }
+        Check(model.TotalCount == 0, "appagent scenario cleanup");
+        Console.WriteLine("PASS: appagent smoke on mode A host (discovery, manifest, actions, state).");
+    }
+
+    private static StringContent JsonBodyB(object payload) =>
+        new(System.Text.Json.JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
 
     private static async Task InvokeAsync(HttpClient client, string method, object[] args, bool expected)
     {

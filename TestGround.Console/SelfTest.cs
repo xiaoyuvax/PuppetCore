@@ -9,7 +9,7 @@ namespace TestGround.Console;
 
 using Console = System.Console;
 
-internal static class SelfTest
+internal static partial class SelfTest
 {
     internal static async Task Run(ExpenseLedger ledger, string key)
     {

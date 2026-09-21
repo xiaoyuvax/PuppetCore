@@ -1,5 +1,6 @@
 using System.Globalization;
 using Puppet.Core;
+using Puppet.Core.AppAgent;
 using Puppet.Core.Usage;
 using Puppet.Core.Web;
 using Wima.Log;
@@ -24,6 +25,8 @@ internal static class Program
         }
         var selfTest = args is ["--self-test"];
         var serve = args is ["--serve"];
+        var bOnly = Environment.GetEnvironmentVariable("PUPPET_TESTGROUND_BONLY") == "1";
+        Environment.SetEnvironmentVariable("PUPPET_TESTGROUND_BONLY", null);
         var key = Environment.GetEnvironmentVariable("PUPPET_TESTGROUND_KEY");
         Environment.SetEnvironmentVariable("PUPPET_TESTGROUND_KEY", null);
         if (key is not null && (key.Length is < 16 or > 256 || key.Any(c => c < '!' || c > '~')))
@@ -62,12 +65,28 @@ internal static class Program
                     }
                     return false;
                 });
+                // B-only 成品形态（PUPPET_TESTGROUND_BONLY=1）：CLI 宿主仅开用户 Agent 接口，无 A 调试通道。
+                // Paranoid 开关防二进制密钥残留事故链；短 TTL/容量供 SelfTest 验证资产过期与超限行为。
+                if (bOnly)
+                    server.UseAppAgent(o =>
+                    {
+                        o.ProductName = "ExpenseLedger";
+                        o.BlockAgentEndpoints = true;
+                        o.AssetTtlMs = 1500;
+                        o.AssetTotalBytes = 2048;
+                        o.AssetMaxEntryBytes = 1024;
+                    });
                 if (!server.Start("127.0.0.1:19102")) throw new InvalidOperationException("Server start failed.");
-                Console.Error.WriteLine("Agent: 127.0.0.1:19102 / ExpenseLedger");
+                Console.Error.WriteLine("Agent: 127.0.0.1:19102 / ExpenseLedger (AppAgent B-only, /agent/* blocked)");
             }
             else Console.Error.WriteLine("Agent disabled: no PUPPET_TESTGROUND_KEY; local ledger only.");
             if (selfTest)
-                await Task.Run(() => SelfTest.Run(ledger, key!)).WaitAsync(timeout.Token);
+            {
+                if (bOnly)
+                    await Task.Run(() => SelfTest.RunBOnly(ledger)).WaitAsync(timeout.Token);
+                else
+                    await Task.Run(() => SelfTest.Run(ledger, key!)).WaitAsync(timeout.Token);
+            }
             else
                 await RunCommands(ledger, serve);
         }
@@ -76,9 +95,9 @@ internal static class Program
             Console.Error.WriteLine("Self-test timed out.");
             exitCode = 1;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            Console.Error.WriteLine(selfTest ? "Self-test failed; see last check name." : "Host failed to start or run.");
+            Console.Error.WriteLine(selfTest ? $"Self-test failed: {ex.GetType().Name}: {ex.Message}" : "Host failed to start or run.");
             exitCode = 1;
         }
         finally
@@ -100,7 +119,10 @@ internal static class Program
         if (selfTest && exitCode == 0)
         {
             if (PuppetRegistry.Resolve("ExpenseLedger") is not null || !ledger.IsStopping) return 1;
-            Console.WriteLine("PASS lifecycle cleanup; self-test complete.");
+            if (bOnly && Directory.GetFiles(SelfTest.ProfileDir(), "ExpenseLedger.*.json").Length > 0) return 1;
+            Console.WriteLine(bOnly
+                ? "PASS B-only appagent lifecycle (profile cleaned); self-test complete."
+                : "PASS lifecycle cleanup; self-test complete.");
         }
         return exitCode;
     }
