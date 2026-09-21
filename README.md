@@ -8,9 +8,14 @@
 
 ### 简介
 
-**Puppet.Core** 是一个由 AI Agent 自己开发出来的且为 AI Agent 使用而设计的 .NET 操控框架：为任意 .NET 类型（含 WinForms 窗体与控件）自动暴露可操控的 WebApi 接口，通过反射生成能力描述，支持运行时状态查询、属性读写与方法调用。
+**Puppet.Core** 是一个由 AI Agent 自己开发出来、并为 AI Agent 使用而设计的 .NET 操控框架：为任意 .NET 类型（含 WinForms 窗体与控件）自动暴露可操控的 WebApi 接口，通过反射生成能力描述，支持运行时状态查询、属性读写与方法调用。
 
-它不是给开发者用的库，而是 Agent 的工具——Agent 借助它模拟真实用户操作、观测运行时状态，对宿主程序实施自动化调试与测试。
+它不是给开发者用的库，而是 Agent 的工具。其目的是在**运行时**支持两件事：
+
+1. **Agent 自动调试**（面向 A）——Agent 借助它模拟真实用户操作、观测运行时状态，对宿主程序实施自动化调试与测试。
+2. **用户通过自然语言操作 Agent 来操控应用**（面向 B）——把应用变成一种"Agent 可代理操控"的新型应用形态：用户对个人 Agent 下达自然语言指令，Agent 以语义化动作驱动应用完成操作流程，**无需 UI Automation**（不截屏、不合成输入、不依赖焦点与控件句柄）。
+
+一套内核、两个门面：`/agent/*`（A 自调试）与 `/appagent/*`（B 用户代理），详见下文《两种面向：A 自调试 / B 用户代理》。
 
 ### 两种集成方式
 
@@ -145,9 +150,14 @@ Puppet.Core 走的是另一条路——**把"动作"提升为一等公民**（Ac
 
 ### Overview
 
-**Puppet.Core** is a .NET framework built for AI agents: it automatically exposes controllable WebApi endpoints for any .NET type (including WinForms windows and controls), generates capability descriptions via reflection, and supports runtime state queries, property read/write, and method invocation.
+**Puppet.Core** is a .NET control framework built by AI agents, for AI agents: it automatically exposes controllable WebApi endpoints for any .NET type (including WinForms windows and controls), generates capability descriptions via reflection, and supports runtime state queries, property read/write, and method invocation.
 
-It is not a library for human developers — it is a tool for agents. Agents use it to simulate real user interactions and observe runtime state, driving automated debugging and testing of host applications.
+It is not a library for human developers — it is a tool for agents. Its purpose is to support two things **at runtime**:
+
+1. **Agent self-debugging** (facet A) — agents use it to simulate real user interactions and observe runtime state, driving automated debugging and testing of host applications.
+2. **Users operating an application through an agent via natural language** (facet B) — turning an app into an "agent-operable" application form: the user gives natural-language instructions to their personal agent, and the agent drives the app through semantic actions to complete the workflow, **with no UI Automation** (no screenshots, no synthesized input, no dependence on focus or control handles).
+
+One kernel, two facades: `/agent/*` (A, self-debugging) and `/appagent/*` (B, user proxy) — see "Two Facets: A Self-Debugging / B User Proxy" below.
 
 ### Integration Modes
 
