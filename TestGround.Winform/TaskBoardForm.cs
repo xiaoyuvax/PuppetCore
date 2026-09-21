@@ -129,6 +129,26 @@ public sealed class TaskBoardForm : Form, IPuppet
         RenderTasks();
     }
 
+    /// <summary>v1.0 演示：异步范式动作——Task&lt;bool&gt; 命中语义锚点自动收录（提案 §3.2 async 锚点）；兼作实例串行 409 演示载体</summary>
+    public async Task<bool> SlowMarkdown(int milliseconds = 500)
+    {
+        await Task.Delay(Math.Max(0, milliseconds));
+        return true;
+    }
+
+    /// <summary>v1.0 面向 B 演示：范式外成员（返回 int）以 [PuppetAction] 覆盖收录，产物走 /appagent/assets 下载</summary>
+    [Puppet.Core.AppAgent.PuppetAction(Desc = "导出当前看板摘要文本文件")]
+    public Puppet.Core.AppAgent.PuppetArtifact ExportSummary()
+    {
+        var lines = $"任务看板摘要\r\n生成时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n" +
+                    $"总任务数：{TotalCount}\r\n待办：{PendingCount}（高优先级 {HighPriorityPendingCount}）\r\n已完成：{CompletedCount}\r\n";
+        return new Puppet.Core.AppAgent.PuppetArtifact("summary.txt", "text/plain; charset=utf-8",
+            System.Text.Encoding.UTF8.GetBytes(lines));
+    }
+
+    /// <summary>面向 B 的 UI 文案静态表演示位（L2）：本示例文案全部由 L1 桥从控件自动提取，无需维护</summary>
+    internal static class AppAgentDescriptors { }
+
     public bool AddTask(string? title, string? priority = "普通")
     {
         if (priority is not ("普通" or "高")) return Report("优先级必须为：普通或高。", false);
@@ -289,13 +309,19 @@ public sealed class TaskBoardForm : Form, IPuppet
     {
         PuppetRegistry.Register(this);
         var key = Environment.GetEnvironmentVariable("PUPPET_TESTGROUND_KEY");
-        Environment.SetEnvironmentVariable("PUPPET_TESTGROUND_KEY", null);
-        if (!string.IsNullOrWhiteSpace(key))
-        {
+        Environment.SetEnvironmentVariable("PUPPET_TESTGROUND_KEY", null);        if (!string.IsNullOrWhiteSpace(key))
+            {
             PuppetKeyVault.SetKey(key);
             try
             {
-                _server = new PuppetWebServer().UseFormControls();
+                _server = new PuppetWebServer()
+                    .UseFormControls()
+                    .UseAppAgentWithUiText(o =>
+                    {
+                        o.ProductName = "小步任务看板";
+                        o.BlockAgentEndpoints = false; // 双面向并存演示；B-only 成品建议 true（Paranoid）
+                        o.BusyWaitMs = 200; // 实例串行等待（SelfTest 409 场景需要短超时）
+                    });
                 _agentStatus.Text = _server.Start("127.0.0.1:19101")
                     ? "Puppet · 127.0.0.1:19101 · TaskBoard"
                     : "Puppet 启动失败；本地看板仍可使用。";

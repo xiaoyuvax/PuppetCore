@@ -9,8 +9,13 @@ namespace TestGround.AspNetCore;
 
 internal static class SelfTest
 {
+    private static Inventory _inventory = null!;
+    private static HttpClient _appClient = null!;
+    private static HttpClient _agentClient = null!;
+
     internal static async Task Run(Inventory inventory, string key)
     {
+        _inventory = inventory;
         Console.WriteLine("CHECK service validation, immutable snapshots, capacity and atomic release");
         var local = new Inventory();
         foreach (var sku in new[] { null, "", "lower", "A B", new string('A', 25) })
@@ -50,6 +55,8 @@ internal static class SelfTest
 
         using var app = Client(19204);
         using var agent = Client(19104);
+        _appClient = app;
+        _agentClient = agent;
         Console.WriteLine("CHECK HTTP readiness, HTML, authentication and validation");
         var ready = false;
         for (var attempt = 0; attempt < 30 && !ready; attempt++)
@@ -149,6 +156,70 @@ internal static class SelfTest
         await Status(app, HttpMethod.Post, "/api/reservations", "{\"sku\":\"INK\",\"quantity\":1}", 201);
         Check((await Invoke(agent, "Snapshot", "[]"))["ok"]!.GetValue<bool>());
         Console.WriteLine("PASS service, browser page and HTTP checks");
+
+        await RunAppAgentSmokeAsync();
+    }
+
+    /// <summary>
+    /// B 面向烟雾测试（模式 C 双服务器）：独立 PuppetWebServer 上的 /appagent/* 与 Kestrel 业务 API、A 通道并存；
+    /// 关键点：B 凭证与 A 密钥分属不同鉴权域，A 密钥轮换后 B 档案凭证不受影响。
+    /// </summary>
+    private static async Task RunAppAgentSmokeAsync()
+    {
+        Console.WriteLine("CHECK appagent on mode C: profile discovery, probe, manifest, action, cross-domain key independence");
+        var profileDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Puppet.AppAgents");
+        var profileFile = Directory.GetFiles(profileDir, "Inventory.*.json").SingleOrDefault()
+            ?? throw new InvalidOperationException("appagent discovery profile missing (mode C host)");
+        string profileKey;
+        using (var pdoc = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(profileFile)))
+            profileKey = pdoc.RootElement.GetProperty("key").GetString()!;
+
+        using var bclient = new HttpClient(new HttpClientHandler { UseProxy = false })
+        { BaseAddress = new Uri("http://127.0.0.1:19104"), Timeout = TimeSpan.FromSeconds(5) };
+        var app = _appClient;
+        using (var probe = await bclient.GetAsync("/appagent/probe"))
+            Check((await probe.Content.ReadAsStringAsync()).Contains("appagent/1.0"));
+
+        // A 通道密钥（已轮换）不能当 B 凭证用；B 凭证在 A 轮换后依然有效 → 鉴权域独立
+        using (var cross = new HttpRequestMessage(HttpMethod.Get, "/appagent/manifest"))
+        {
+            cross.Headers.Authorization = new AuthenticationHeaderValue("Bearer", app.DefaultRequestHeaders.Authorization!.Parameter!);
+            using var response = await bclient.SendAsync(cross);
+            Check(response.StatusCode == HttpStatusCode.Unauthorized);
+        }
+        _agentClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", app.DefaultRequestHeaders.Authorization!.Parameter!);
+        using (var probeA = await _agentClient.GetAsync("/agent/registry"))
+            Check(probeA.IsSuccessStatusCode);
+        bclient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", profileKey);
+        using (var manifest = await bclient.GetAsync("/appagent/manifest"))
+        {
+            manifest.EnsureSuccessStatusCode();
+            var json = await manifest.Content.ReadAsStringAsync();
+            Check(json.Contains("\"reserve\"") && json.Contains("Reserve stock by SKU"));
+            Check(!json.Contains("Snapshot") && !json.Contains("CreateStock"));
+        }
+        // B 释放 A 段轮换测试留下的存量预留（B 动作与 Kestrel API 操作同一业务状态）
+        var existing = _inventory.Snapshot().Reservations.Single();
+        using (var call = await bclient.PostAsync("/appagent/actions/release",
+            new StringContent("{\"args\":{\"id\":\"" + existing.Id + "\"}}", Encoding.UTF8, "application/json")))
+        {
+            call.EnsureSuccessStatusCode();
+            Check((await call.Content.ReadAsStringAsync()).Contains("\"ok\":true"));
+        }
+        Check(_inventory.Snapshot().Stock.Single(s => s.Sku == "INK").Reserved == 0);
+        // B 预留成功 → 错误契约：空 GUID 触发宿主异常式校验 → 500 action-failed
+        using (var call = await bclient.PostAsync("/appagent/actions/reserve",
+            new StringContent("{\"args\":{\"sku\":\"INK\",\"quantity\":1}}", Encoding.UTF8, "application/json")))
+        {
+            call.EnsureSuccessStatusCode();
+            Check((await call.Content.ReadAsStringAsync()).Contains("\"ok\":true"));
+        }
+        Check(_inventory.Snapshot().Stock.Single(s => s.Sku == "INK").Reserved == 1);
+        using (var del = await bclient.PostAsync("/appagent/actions/release",
+            new StringContent("{\"args\":{\"id\":\"00000000-0000-0000-0000-000000000000\"}}", Encoding.UTF8, "application/json")))
+            Check(del.StatusCode == HttpStatusCode.InternalServerError);
+        Console.WriteLine("PASS appagent smoke on mode C host");
     }
 
     private static HttpClient Client(int port) => new(new HttpClientHandler { UseProxy = false })

@@ -56,6 +56,24 @@ public sealed class ExpenseLedger : IPuppet
 
     public bool IsStopping => _stop.IsCancellationRequested;
 
+    /// <summary>v1.0 B-only 演示：CLI 宿主的导出动作（范式外返回类型，[PuppetAction] 覆盖收录；产物走 /appagent/assets）</summary>
+    [Puppet.Core.AppAgent.PuppetAction(Desc = "导出账本 CSV 文本")]
+    public Puppet.Core.AppAgent.PuppetArtifact ExportCsv()
+    {
+        lock (_gate)
+        {
+            var sb = new System.Text.StringBuilder("id,amount,category,note\r\n");
+            foreach (var e in _entries)
+                sb.Append(e.Id).Append(',').Append(e.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                  .Append(',').Append(e.Category).Append(",\"").Append(e.Note.Replace("\"", "\"\""))
+                  .Append("\"\r\n");
+            return new Puppet.Core.AppAgent.PuppetArtifact("ledger.csv", "text/csv",
+                System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+        }
+    }
+
+    /// <summary>用户核心动词（返回 Expense 复杂类型，范式外）——提炼 Agent 以 [PuppetAction] 覆盖收录进 B 面向</summary>
+    [Puppet.Core.AppAgent.PuppetAction(Desc = "记一笔支出")]
     public Expense Add(decimal amount, string category, string note)
     {
         if (amount < 0.01m || amount > 1000000m || decimal.Round(amount, 2) != amount)

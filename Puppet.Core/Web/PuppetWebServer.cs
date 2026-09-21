@@ -17,6 +17,9 @@ namespace Puppet.Core.Web
         /// <summary>扩展端点处理器链（先于内建 /agent/* 端点执行）</summary>
         private readonly List<Func<WebRequest, bool>> _extraHandlers = new();
 
+        /// <summary>面向 B 运行时（UseAppAgent 时创建；null = 未启用，零行为差异）</summary>
+        private AppAgent.AppAgentRuntime _appAgentRuntime;
+
         /// <summary>构造 PuppetWebServer</summary>
         public PuppetWebServer()
         {
@@ -26,16 +29,32 @@ namespace Puppet.Core.Web
             IsRunning = true;
         }
 
-        /// <summary>启动 Agent Web 服务器（默认端口 9090）</summary>
+        /// <summary>启动 Agent Web 服务器（默认端口 9090）。
+        /// 已 UseAppAgent 时启动成功后写发现档案（endpoint 含实际端口）。</summary>
         /// <param name="listenEp">监听端点，如 "0.0.0.0:9090"</param>
         /// <returns>是否启动成功</returns>
         public bool Start(string listenEp = DEFAULT_ENDPOINT)
         {
-            return StartWebEngine(listenEp, Wima.Web.WebEngine.Kestrel, reuseAddress: true);
+            var ok = StartWebEngine(listenEp, Wima.Web.WebEngine.Kestrel, reuseAddress: true);
+            if (ok && _appAgentRuntime != null)
+            {
+                var idx = listenEp?.LastIndexOf(':') ?? -1;
+                var portStr = idx >= 0 ? listenEp[(idx + 1)..] : null;
+                _appAgentRuntime.Bind(int.TryParse(portStr, out var p) ? p : 9090);
+            }
+            return ok;
         }
 
-        /// <summary>停止 Agent Web 服务器</summary>
-        public void Stop() => StopWebEngine(dispose: true);
+        /// <summary>停止 Agent Web 服务器（清理发现档案）</summary>
+        public void Stop()
+        {
+            _appAgentRuntime?.Unbind();
+            StopWebEngine(dispose: true);
+        }
+
+        /// <summary>挂接面向 B 运行时（UseAppAgent 扩展调用；内部 API）。
+        /// 端点在 ProcessWebRequest 中先于扩展处理器链执行，保证 BlockAgentEndpoints 拦截不被绕过。</summary>
+        internal void AttachAppAgent(AppAgent.AppAgentRuntime runtime) => _appAgentRuntime = runtime;
 
         /// <summary>
         /// 注册扩展端点处理器（返回 true 表示已处理并终结请求）。
@@ -56,6 +75,13 @@ namespace Puppet.Core.Web
             base.ProcessWebRequest(req);
 
             if (req.Path == "/ping") { req.Response.SetStatus200(); return req.Response; }
+
+            // 面向 B 端点最先（含 BlockAgentEndpoints 对 /agent/* 的 Paranoid 拦截）
+            if (_appAgentRuntime != null && AppAgentWebHandler.TryHandle(ref req, _appAgentRuntime))
+            {
+                req.Response.OutputCompressed();
+                return req.Response;
+            }
 
             // 扩展端点先于内建 /agent/* 端点（见 UseHandler 说明）
             foreach (var handler in _extraHandlers)
