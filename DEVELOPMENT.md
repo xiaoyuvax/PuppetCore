@@ -22,7 +22,7 @@
 
 * Puppet.Core.WinForms：WinForm 专用（控件树遍历、控件操作 Click/Text/Select）
 
-Console 诊断扩展位于 `Puppet.Core/Extentions/ConsolePuppetExtensions.cs`，使用 `Puppet.Core.Extentions` 命名空间；仅描述进程状态，不提供 stdin/stdout 交互或环境变量枚举。原 `Puppet.Core.Console` 独立项目及包已移除，不保留旧命名空间；调用方只需引用 `Puppet.Core` 并更新 using。
+Console 诊断扩展位于 `Puppet.Core/Extentions/ConsolePuppetExtensions.cs`，使用 `Puppet.Core.Extentions` 命名空间；仅描述进程状态，不提供 stdin/stdout 交互或环境变量枚举。
 
 ## 核心接口
 
@@ -38,11 +38,11 @@ Console 诊断扩展位于 `Puppet.Core/Extentions/ConsolePuppetExtensions.cs`�
 
 * `[PuppetIgnore]` — 不暴露给 Agent 的成员（密钥/句柄/内部状态等）
 
-* `[PuppetExpose("理由")]` — 显式暴露**非 public** 成员；public 成员默认已暴露，无需此特性
+* `[PuppetExpose]`（可加 `Reason = "理由"`）— 显式暴露**非 public** 成员（方法/属性/字段/事件）；public 成员默认已暴露，无需此特性
 
 * `[PuppetDescription("描述")]` — 补充/覆盖描述
 
-> 成员可访问规则：`public` 默认可访问；`non-public` 需 `[PuppetExpose]` 才可被调用/读取。`[PuppetIgnore]` 优先级最高，任何情况下都不暴露。
+> 成员可访问规则：`public` 默认可访问；`non-public` **方法/属性**需 `[PuppetExpose]` 才可被调用/读取。**非 public 字段**例外——`/agent/get`·`/agent/set` 可直接访问（便于访问设计器生成的控件字段），但 `/agent/describe` 仅列出带 `[PuppetExpose]` 的非 public 字段。`[PuppetIgnore]` 优先级最高，任何情况下都不暴露。
 
 ### 枚举
 
@@ -99,7 +99,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 | 端点                   | 方法   | 说明                                                                    |
 | -------------------- | ---- | --------------------------------------------------------------------- |
-| `/agent/registry`    | GET  | 条件查询实例列表（type/tags/includeInternal/activeWithin/keyword/offset/limit） |
+| `/agent/registry`    | GET  | 条件查询实例列表（仅全局密钥；type/tags/includeInternal/activeWithin/keyword/offset/limit） |
 | `/agent/state`       | GET  | JSONPath 查询运行时状态（`path`/`include`/`exclude`）                          |
 | `/agent/get`         | GET  | 按点分路径读单属性（`path`，如 `SelectedStateName`）——优先使用                         |
 | `/agent/set`         | POST | 按点分路径写属性，触发对应 UI 事件（body: `{path,value}`）                             |
@@ -112,6 +112,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | 端点                   | 方法   | 说明                                                                    |
 | -------------------- | ---- | --------------------------------------------------------------------- |
 | `/agent/usage`       | GET  | 使用率摘要：各功能类别调用次数 + error 数（供优化/清理由）                                    |
+| `/agent/docs`        | GET  | 读取内嵌的 DEVELOPMENT.md（与运行中程序集版本一致）                                      |
 | `/agent/key/refresh` | POST | 刷新全局密钥                                                                |
 
 ### 多 Agent 协调端点（仅全局密钥）
@@ -280,7 +281,7 @@ sequenceDiagram
 ```
 
 * **建议性**：框架不拦截未加锁的调用，Agent 自愿遵守
-* **超时自动释放**：Acquire 超时默认 5s；心跳超时 5 分钟顺带清理该 Agent 持有的锁，防死锁
+* **获取超时**：Acquire 默认等待 5s，超时返回 `{ok:false}`（不自动释放已持有的锁）；释放须显式 `/agent/lock/release`。心跳超时（5 分钟）仅清理 AgentBook 会话，**不**自动释放其持有的锁——长任务请自行释放
 * **重入**：同一 Agent 对同一站点 Write 可重入
 
 ### PuppetHintAttribute —— 运行时提示
@@ -307,7 +308,7 @@ public void RefreshData() { ... }
 **查询方式**：
 - `GET /agent/hints?name=MyForm` — 单实例所有提示
 - `GET /agent/hints` — 所有实例提示
-- `/agent/describe` 的 `Notes` 字段也包含注释
+- `/agent/describe` 的 `Hints` 字段也包含注释
 
 **用途**：Agent 发现坑点/约束时即时标记，后续 Agent 复用，避免重复踩坑。
 
@@ -317,39 +318,41 @@ public void RefreshData() { ... }
 
 **端点**：`GET /agent/capabilities`（仅全局密钥）
 
-**返回示例**：
+**返回示例**（Newtonsoft 默认，PascalCase 属性名）：
 ```json
 {
-  "version": "1.0.0",
-  "informationalVersion": "1.0.0+abc1234",
-  "assemblyPath": "D:\\app\\Puppet.Core.dll",
-  "isSourceReference": true,
-  "isNuGetPackage": false,
-  "targetFramework": ".NETCoreApp,Version=v10.0",
-  "buildConfiguration": "Release",
-  "supportsPuppetHint": true,
-  "supportsAgentBook": true,
-  "supportsSiteLock": true,
-  "supportsLogForwarder": true,
-  "supportsMultiAgent": true
+  "Version": "1.2.5",
+  "InformationalVersion": "1.2.5+abc1234",
+  "AssemblyPath": "D:\\app\\Puppet.Core.dll",
+  "IsSourceReference": true,
+  "IsNuGetPackage": false,
+  "TargetFramework": ".NETCoreApp,Version=v10.0",
+  "BuildConfiguration": "Release",
+  "SupportsPuppetHint": true,
+  "SupportsAgentBook": true,
+  "SupportsSiteLock": true,
+  "SupportsLogForwarder": true,
+  "SupportsMultiAgent": true,
+  "SupportsAppAgent": true
 }
 ```
 
 **关键字段**：
 | 字段 | 含义 |
 |------|------|
-| `isSourceReference` | `true` = 源码引用，Agent 可修改 PuppetCore 源码并重新编译；`false` = NuGet 包，不可改源码 |
-| `isNuGetPackage` | 互斥标识 |
-| `supportsPuppetHint` | 是否支持 `[PuppetHint]` 与 `/agent/hints` |
-| `supportsAgentBook` | 是否支持多 Agent 协调 |
-| `supportsSiteLock` | 是否支持建议性锁 |
-| `supportsLogForwarder` | 是否支持 `PLog.Fwd()` |
-| `supportsMultiAgent` | 是否支持多 Agent 共存 |
+| `IsSourceReference` | `true` = 源码引用，Agent 可修改 PuppetCore 源码并重新编译；`false` = NuGet 包，不可改源码 |
+| `IsNuGetPackage` | 互斥标识 |
+| `SupportsPuppetHint` | 是否支持 `[PuppetHint]` 与 `/agent/hints` |
+| `SupportsAgentBook` | 是否支持多 Agent 协调 |
+| `SupportsSiteLock` | 是否支持建议性锁 |
+| `SupportsLogForwarder` | 是否支持 `PLog.Fwd()` |
+| `SupportsMultiAgent` | 是否支持多 Agent 共存 |
+| `SupportsAppAgent` | 是否支持面向 B（`/appagent/*`；是否启用由宿主 `UseAppAgent` 决定） |
 
 **Agent 决策示例**：
-- `isSourceReference=true` → 发现缺功能可直接在 PuppetCore 源码加端点/修复 Bug → 重新编译宿主
-- `isSourceReference=false` → 只能用现有端点，或通过宿主侧扩展 `UseHandler` 注入自定义端点
-- `supportsPuppetHint=false` → 不要尝试写/读 `/agent/hints`
+- `IsSourceReference=true` → 发现缺功能可直接在 PuppetCore 源码加端点/修复 Bug → 重新编译宿主
+- `IsSourceReference=false` → 只能用现有端点，或通过宿主侧扩展 `UseHandler` 注入自定义端点
+- `SupportsPuppetHint=false` → 不要尝试写/读 `/agent/hints`
 
 ## 实战踩坑记录
 
@@ -363,7 +366,7 @@ public void RefreshData() { ... }
 
 * **异步就绪判定**：涉及异步 UI 流程时，调用后轮询就绪标志，不要立即读后续状态。
 
-* **注册时机**：窗体在**构造时**注册到注册表（`Disposed → Unregister`）。查询可用实例先 `/agent/registry`。
+* **注册时机**：窗体在显示后（WinForms `OnShown` / WPF `Loaded`）注册到注册表，关闭时 `Unregister`。查询可用实例先 `/agent/registry`。
 
 ## 面向 B：用户 Agent 操作接口（/appagent/*）
 
@@ -393,11 +396,11 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 | `GET /appagent/state/{key}` | **Bearer** | 简单类型状态直读（文本聊天视图） |
 | `GET /appagent/assets/{id}` | **Bearer** | 产物下载（内存态模拟磁盘文件） |
 
-**发现（三级，零手动配置）**：L0 枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json`（{app, endpoint, key, protocol}，用户档案 ACL 隔离——RDP 其他用户/远程读不到即拒绝，OS 用户隔离代行授权）；L1 扫描端口 + probe；L2 读 help。用户只需说“访问本地 9090 端口了解详情”。
+**发现（三级，零手动配置）**：L0 枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json`（{app, endpoint, key, protocol, pid, registeredAt}，用户档案 ACL 隔离——RDP 其他用户/远程读不到即拒绝，OS 用户隔离代行授权）；L1 扫描端口 + probe；L2 读 help。用户只需说“访问本地 9090 端口了解详情”。
 
 ### Actionize 范式（无需逐个标注）
 
-动作方法自动收录 = **正面形状**（public 实例方法、DeclaredOnly、非 special name/override/static/泛型）+ **语义锚点**（返回 `bool` / `OperationResult` / `Task<bool>` / `Task<OperationResult>`——成败可观察）+ **负面排除**（`[PuppetIgnore]` 永远赢 / out·ref 参数 / `Is`·`Can`·`Has`·`Should` 谓词前缀）。状态属性自动收录 = public + 简单类型（基本类型/字符串/枚举/日期/Guid）。范式外成员用覆盖特性补漏：`[PuppetAction(Name,Desc)]`、`[PuppetState(Name,Desc)]`、`[PuppetParam(Desc,Sensitive)]`、`[PuppetAppInfo(Name,Version,Vendor)]`（类或程序集级）。
+动作方法自动收录 = **正面形状**（public 实例方法、DeclaredOnly、非 special name/override/static/泛型）+ **语义锚点**（返回 `bool` / `OperationResult` / `Task<bool>` / `Task<OperationResult>`——成败可观察）+ **负面排除**（`[PuppetIgnore]` 永远赢 / out·ref 参数 / `Is`·`Can`·`Has`·`Should` 谓词前缀）。状态属性自动收录 = public + 简单类型（基本类型/字符串/枚举/日期/Guid）。范式外成员用覆盖特性补漏：`[PuppetAction("name", Desc="…")]`、`[PuppetState("key", Desc="…")]`、`[PuppetParam(Desc="…", Sensitive=true)]`、`[PuppetAppInfo("name", Version="…", Vendor="…")]`（类或程序集级）。
 
 **文案三层同源**（优先级递减）：① `[PuppetAction(Desc=…)]` 显式；② L1 UI 同源——WinForms 桥扫描控件树取 AccessibleName > Text（剥离 & 助记符），manifest 的 `uiTexts` 为原始控件文案图；③ L3 方法名拆词（Inferred）。**避免在特性里重写 UI 已有的文案。**
 
@@ -406,10 +409,10 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 > **Actionize 范围**：Agent 应先了解用户期望的 actionize 范围（例如直接询问用户）。**默认**是尽可能全面、彻底地 actionize——覆盖所有用户界面操作与核心能力。其中部分核心能力并不直接面向用户，但可通过 B 面向暴露；是否纳入由 Agent 与用户征询确定。
 
 1. **提炼者与实施者 = 开发期 Agent**（即你），人类审定：① 从源码 + A 端点运行时走查归纳**流程树**（含界面未暴露但用户可自然语言要求的内部动作）；② 按需等效重构——事件处理器内联逻辑落为谓词方法（public + bool 返回即自动 Actionize，方法名对应自然语言动作）；**不启用 B 则完全不重构**；③ 范式外的真动作用 `[PuppetAction]` 补漏；④ 验证闭环——走 B 通道黑盒试运行每条 action；⑤ 本节即 spec，随包分发；⑥ **覆盖度扫描**（找出"未覆盖的用户操作"，含死菜单/未提炼/反向不对称三类缺口）见下节《Actionize 覆盖度扫描》。
-2. **契约**：参数严格按名绑定（未知/缺必填 400）；同名重载需 `[PuppetAction(Name=…)]` 区分；动作在**实例级强制串行**下执行（busy 时 409 `{code:"instance-busy",retryAfterMs}`）；`Task<T>` 自动解包；响应结果形状——bool→ok、`OperationResult`→ok/message/data、**范式外成员（`[PuppetAction]` 收录）返回 null → `ok:false`**（未产出结果，如重名守卫 return null；纯 `Task` 与已提取产物除外）、标量返回值（计数/名称等）进 `data` 供 Agent 核对、复杂类型不序列化；action 返回 `PuppetArtifact(fileName, contentType, bytes)` 时响应携带 `asset` URL，Agent 应**立即下载**（默认 TTL 10 分钟、总量 256MB、单条目 100MB，`AssetTtlMs/AssetTotalBytes/AssetMaxEntryBytes` 可配）；所有错误统一 `{ok:false, code, err, hint, retryAfterMs?}`，按 hint 行动。
+2. **契约**：参数严格按名绑定（未知/缺必填 400）；同名重载需 `[PuppetAction("name")]` 区分；动作在**实例级强制串行**下执行（busy 时 409 `{code:"instance-busy",retryAfterMs}`）；`Task<T>` 自动解包；响应结果形状——bool→ok、`OperationResult`→ok/message/data、**范式外成员（`[PuppetAction]` 收录）返回 null → `ok:false`**（未产出结果，如重名守卫 return null；纯 `Task` 与已提取产物除外）、标量返回值（计数/名称等）进 `data` 供 Agent 核对、复杂类型不序列化；action 返回 `PuppetArtifact(fileName, contentType, bytes)` 时响应携带 `asset` URL，Agent 应**立即下载**（默认 TTL 10 分钟、总量 256MB、单条目 100MB，`AssetTtlMs/AssetTotalBytes/AssetMaxEntryBytes` 可配）；所有错误统一 `{ok:false, code, err, hint, retryAfterMs?}`，按 hint 行动。
 3. **并发协调**：单动作无需加锁（强制串行兜底）；多步原子序列用 A 面向的 SiteLock（协议一致）。
 4. **安全**：本地免交互授权（与 CLI 同信任域，OS 隔离代行）；远程授权（AllowRemote）与审计列二期；B-only 成品发布前检查——`BlockAgentEndpoints=true`、代码中无 `PuppetKeyVault.SetKey("字面量")` 残留、无遗留 `Register()`（防字符串常量被反编译提取）。
-5. 能力探测：`/agent/capabilities` 返回 `supportsAppAgent: true`。
+5. 能力探测：`/agent/capabilities` 返回 `SupportsAppAgent: true`。
 
 参考实现：`TestGround.Winform`（双面向并存演示：范式自动收录 + `[PuppetAction]` 补漏 + 产物下载 + SelfTest 锁定 A/B 行为）；设计全录见仓库 `DUAL-ASPECT-PROPOSAL.md`（v1.0）。
 
@@ -507,10 +510,10 @@ $key = (Get-Content "$env:LOCALAPPDATA\Puppet.AppAgents\<app>.<pid>.json" -Raw |
 
 | 项目 | 集成模式 | 关键演示点 |
 |------|----------|------------|
-| `TestGround.Wpf` | 模式 A（极简注入） | WPF 窗体实现 `IPuppet`，`Register/Unregister`，`PuppetWebHandler.TryHandle` 注入，`[PuppetExpose]` 业务方法，`[PuppetIgnore]` 基础设施 |
-| `TestGround.AspNetCore` | 模式 C（双服务器） | Kestrel + 独立 `PuppetWebServer`，外部 Web 服务器请求类型包装，`UseHandler` 限流/鉴权，`Inventory` 业务状态仅暴露业务方法 |
-| `TestGround.Winform` | 模式 B（内建服务器） | `PuppetWebServer().UseFormControls()`，WinForms 控件树遍历与操作端点 `/agent/control` |
-| `TestGround.Console` | 模式 B（内建服务器） | Console 进程诊断扩展 `Puppet.Core.Extentions`，进程状态描述 |
+| `TestGround.Wpf` | 模式 B（内建服务器） | WPF 模型实现 `IPuppet`，`PuppetWebServer().UseAppAgent()`，`Register/Unregister`，public 业务方法自动 Actionize，`[PuppetIgnore]` 基础设施 |
+| `TestGround.AspNetCore` | 模式 C（双服务器） | Kestrel 业务 API + 独立 `PuppetWebServer`，`UseHandler` 限流，`Inventory` 以 `[PuppetExpose]` 暴露业务方法 |
+| `TestGround.Winform` | 模式 B（内建服务器） | `PuppetWebServer().UseFormControls()`，WinForms 控件树遍历与操作端点 `/agent/control`，`UseAppAgentWithUiText` |
+| `TestGround.Console` | 模式 B（内建服务器） | `ExpenseLedger` 实现 `IPuppet`，`PuppetWebServer` 内建服务器，`[PuppetAction]` 补漏与 B-only（`BlockAgentEndpoints`）演示 |
 
 **参考方式**：Agent 以宿主开发方身份已拥有完整宿主源码，TestGround 仅作集成模式对照。需对照某模式时，阅读对应 `Program.cs` 与 `IPuppet` 实现类。
 
