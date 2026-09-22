@@ -123,6 +123,10 @@ Puppet.Core 走的是另一条路——**把"动作"提升为一等公民**（Ac
 
 > 不启用 B 面向时零代码路径、零行为差异；成品应用可设 `BlockAgentEndpoints=true` 让 `/agent/*` 一律 404。
 
+#### 启用 B 面向：指示 Agent 对项目做 Actionize
+
+B 面向的能力强弱取决于项目里"被 actionize 的动作"有多少，默认并不充分。要充分发挥，用户需要**明确指示 Agent 对项目进行 actionize**，例如："全面 actionize，覆盖所有界的操作细节"。效果视模型能力而不同——能力越强的 Agent 覆盖越全。即便如此仍可能有动作缺失（埋藏在私有事件处理器里，或界面未暴露的内部能力），可要求 Agent 尽力增补。
+
 #### 现状与观察
 
 * **A 面向（自调试闭环）已成熟**：状态可读到单属性粒度（`/agent/get?path=a.b.c`），`invoke` 会阻塞等待 `Task`，跨线程自动切回 UI 线程，实测可稳定驱动完整业务流程。
@@ -264,6 +268,10 @@ Puppet.Core takes a different route — it promotes **actions to first-class cit
 | `GET /appagent/assets/{id}` | Bearer | Artifact download (in-memory stand-in for disk files) |
 
 > With facet B disabled there is zero code path and zero behavioral difference; a shipped app can set `BlockAgentEndpoints=true` to answer 404 for all `/agent/*`.
+
+#### Enabling facet B: instruct the agent to actionize the project
+
+How capable facet B is depends on how many "actions" have been actionized in the project, and it is not sufficient by default. To get the most out of it, the user must **explicitly instruct the agent to actionize the project** — for example, "fully actionize, covering every operation detail". Results vary with model capability: stronger agents cover more. Even then, actions may still be missing (buried in private event handlers, or internal capabilities not exposed in the UI); the user can ask the agent to supplement as best it can.
 
 #### Status and observations
 

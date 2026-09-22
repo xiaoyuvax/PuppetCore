@@ -421,6 +421,8 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 
 ### 面向 B 实施要点（宿主 Agent 须知）
 
+> **Actionize 范围**：Agent 应先了解用户期望的 actionize 范围（例如直接询问用户）。**默认**是尽可能全面、彻底地 actionize——覆盖所有用户界面操作与核心能力。其中部分核心能力并不直接面向用户，但可通过 B 面向暴露；是否纳入由 Agent 与用户征询确定。
+
 1. **提炼者与实施者 = 开发期 Agent**（即你），人类审定：① 从源码 + A 端点运行时走查归纳**流程树**（含界面未暴露但用户可自然语言要求的内部动作）；② 按需等效重构——事件处理器内联逻辑落为谓词方法（public + bool 返回即自动 Actionize，方法名对应自然语言动作）；**不启用 B 则完全不重构**；③ 范式外的真动作用 `[PuppetAction]` 补漏；④ 验证闭环——走 B 通道黑盒试运行每条 action；⑤ 本节即 spec，随包分发；⑥ **覆盖度扫描**（找出"未覆盖的用户操作"，含死菜单/未提炼/反向不对称三类缺口）见下节《Actionize 覆盖度扫描》。
 2. **契约**：参数严格按名绑定（未知/缺必填 400）；同名重载需 `[PuppetAction(Name=…)]` 区分；动作在**实例级强制串行**下执行（busy 时 409 `{code:"instance-busy",retryAfterMs}`）；`Task<T>` 自动解包；响应结果形状——bool→ok、`OperationResult`→ok/message/data、**范式外成员（`[PuppetAction]` 收录）返回 null → `ok:false`**（未产出结果，如重名守卫 return null；纯 `Task` 与已提取产物除外）、标量返回值（计数/名称等）进 `data` 供 Agent 核对、复杂类型不序列化；action 返回 `PuppetArtifact(fileName, contentType, bytes)` 时响应携带 `asset` URL，Agent 应**立即下载**（默认 TTL 10 分钟、总量 256MB、单条目 100MB，`AssetTtlMs/AssetTotalBytes/AssetMaxEntryBytes` 可配）；所有错误统一 `{ok:false, code, err, hint, retryAfterMs?}`，按 hint 行动。
 3. **并发协调**：单动作无需加锁（强制串行兜底）；多步原子序列用 A 面向的 SiteLock（协议一致）。
