@@ -56,7 +56,7 @@ internal static class Program
                     if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(authorization), Encoding.UTF8.GetBytes(expected)))
                     {
                         context.Response.Headers.WWWAuthenticate = "Bearer";
-                        await Results.Problem(statusCode: 401, title: "A valid runtime key is required.").ExecuteAsync(context);
+                        await Results.Problem(statusCode: 401, title: Loc.T("需要有效的运行时密钥。", "A valid runtime key is required.")).ExecuteAsync(context);
                         return;
                     }
                 }
@@ -65,11 +65,11 @@ internal static class Program
                 {
                     var (status, title) = ex switch
                     {
-                        BadHttpRequestException bad => (bad.StatusCode, "Invalid request body or route value."),
+                        BadHttpRequestException bad => (bad.StatusCode, Loc.T("请求体或路由值无效。", "Invalid request body or route value.")),
                         ArgumentException => (400, ex.Message),
                         KeyNotFoundException => (404, ex.Message),
                         InvalidOperationException => (409, ex.Message),
-                        _ => (500, "Request failed.")
+                        _ => (500, Loc.T("请求失败。", "Request failed."))
                     };
                     await Results.Problem(statusCode: status, title: title).ExecuteAsync(context);
                 }
@@ -120,8 +120,8 @@ internal static class Program
             }
             await app.StartAsync();
             Console.WriteLine(agentEnabled
-                ? "Inventory UI/API: http://127.0.0.1:19204 | Puppet: 127.0.0.1:19104 / Inventory"
-                : "Inventory UI/API: http://127.0.0.1:19204 | Puppet disabled: no PUPPET_TESTGROUND_KEY");
+                ? Loc.T("库存 UI/API：http://127.0.0.1:19204 | Puppet：127.0.0.1:19104 / Inventory", "Inventory UI/API: http://127.0.0.1:19204 | Puppet: 127.0.0.1:19104 / Inventory")
+                : Loc.T("库存 UI/API：http://127.0.0.1:19204 | Puppet 已禁用：未提供 PUPPET_TESTGROUND_KEY", "Inventory UI/API: http://127.0.0.1:19204 | Puppet disabled: no PUPPET_TESTGROUND_KEY"));
             if (selfTest)
             {
                 if (!agentEnabled) throw new InvalidOperationException("Self-test requires PUPPET_TESTGROUND_KEY.");
@@ -151,12 +151,12 @@ internal static class Program
                     finally { await app.DisposeAsync(); }
                 }
             }
-            catch (Exception) { Console.Error.WriteLine("Application shutdown failed."); exitCode = 1; }
+            catch (Exception) { Console.Error.WriteLine(Loc.T("应用程序关闭失败。", "Application shutdown failed.")); exitCode = 1; }
             try
             {
                 if (agent is not null) await Task.Run(agent.Stop).WaitAsync(TimeSpan.FromSeconds(10));
             }
-            catch (Exception) { Console.Error.WriteLine("Agent shutdown failed."); exitCode = 1; }
+            catch (Exception) { Console.Error.WriteLine(Loc.T("Agent 关闭失败。", "Agent shutdown failed.")); exitCode = 1; }
             PuppetKeyVault.RefreshKey();
         }
             if (selfTest && exitCode == 0)

@@ -3,37 +3,144 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stockroom · Inventory & reservations</title>
+<title data-i18n="title">Stockroom · Inventory & reservations</title>
 <style>
 :root{font-family:system-ui,sans-serif;color:#1c3040;background:#eef3f6;color-scheme:light}*{box-sizing:border-box}body{margin:0}main{max-width:1080px;margin:auto;padding:36px 20px}header{display:flex;align-items:center;justify-content:space-between;gap:20px}h1{margin:0;font-size:2.5rem;letter-spacing:-.06em}h2{font-size:1.1rem;margin:0 0 18px}p{color:#516475;line-height:1.6}.badge{background:#d6ede4;color:#185d47;padding:8px 14px;border-radius:24px;white-space:nowrap}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.card{background:white;border:1px solid #dce5ec;border-radius:18px;padding:24px;margin:20px 0;box-shadow:0 6px 20px #20304006}label{display:block;font-size:.88rem;font-weight:600;margin:12px 0 6px}input,select,button{font:inherit;min-height:44px;border-radius:8px}input,select{width:100%;padding:10px;border:1px solid #8e9eab;background:white;color:inherit}button{padding:10px 18px;border:0;background:#146950;color:white;cursor:pointer;margin-top:16px;font-weight:600}button.secondary{background:#e7eff4;color:#243e52}button:disabled{opacity:.55;cursor:wait}:focus-visible{outline:3px solid #407cc4;outline-offset:3px}.row{display:flex;gap:12px;align-items:end}.row>div{flex:1}.row button{flex-shrink:0}.hint{font-size:.85rem;margin-bottom:0}#status{min-height:28px;margin:8px 0;color:#16533f}#status.error{color:#a12c20}.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:12px 10px;border-bottom:1px solid #e3eaf0}th{font-size:.8rem;text-transform:uppercase;color:#516475}td button{margin:0;min-height:36px;padding:6px 12px}caption{text-align:left;padding:0 0 16px;font-weight:650}.empty{padding:20px;color:#516475}.id{font-family:monospace;font-size:.8rem}footer{font-size:.85rem;color:#516475}@media(max-width:680px){.grid{grid-template-columns:1fr;gap:0}header{align-items:start;flex-direction:column}.row{flex-wrap:wrap}.card{padding:18px}h1{font-size:2rem}}
 </style>
 </head>
 <body>
 <main>
-<header><div><h1>Stockroom</h1><p>A small workspace for stock and active reservations.</p></div><span class="badge">Local · In memory</span></header>
+<header><div><h1 data-i18n="heading">Stockroom</h1><p data-i18n="tagline">A small workspace for stock and active reservations.</p></div><span class="badge" data-i18n="badge">Local · In memory</span></header>
 <section class="card" aria-labelledby="access-title">
-<h2 id="access-title">Workspace access</h2>
-<form id="access"><div class="row"><div><label for="key">Runtime key</label><input id="key" type="password" autocomplete="off" minlength="16" maxlength="256" required placeholder="PUPPET_TESTGROUND_KEY"></div><button>Use key</button><button class="secondary" type="button" id="forget">Forget key</button></div></form>
-<p class="hint">Read freely on this machine. Changes require the runtime key. This page keeps it only in memory; reload to forget it. Do not save it in your browser.</p>
+<h2 id="access-title" data-i18n="accessTitle">Workspace access</h2>
+<form id="access"><div class="row"><div><label for="key" data-i18n="runtimeKey">Runtime key</label><input id="key" type="password" autocomplete="off" minlength="16" maxlength="256" required placeholder="PUPPET_TESTGROUND_KEY"></div><button data-i18n="useKey">Use key</button><button class="secondary" type="button" id="forget" data-i18n="forgetKey">Forget key</button></div></form>
+<p class="hint" data-i18n="accessHint">Read freely on this machine. Changes require the runtime key. This page keeps it only in memory; reload to forget it. Do not save it in your browser.</p>
 </section>
 <div id="status" role="status" aria-live="polite"></div>
 <div class="grid">
-<section class="card"><h2>Create stock</h2><form id="create"><label for="sku">SKU</label><input id="sku" name="sku" required pattern="[A-Z0-9\-]{1,24}" maxlength="24" placeholder="NOTEBOOK-A5"><label for="name">Item name</label><input id="name" name="name" required maxlength="80" placeholder="A5 notebook"><label for="total">Units received</label><input id="total" name="quantity" type="number" min="1" max="1000000" step="1" value="10" required><button>Create stock</button></form></section>
-<section class="card"><h2>Reserve units</h2><form id="reserve"><label for="reserve-sku">Item</label><select id="reserve-sku" name="sku" required><option value="">Create stock first</option></select><label for="quantity">Units to reserve</label><input id="quantity" name="quantity" type="number" min="1" max="1000000" step="1" value="1" required><p class="hint">Only available units can be reserved. Release a reservation to return all of its units to availability.</p><button>Reserve units</button></form></section>
+<section class="card"><h2 data-i18n="createTitle">Create stock</h2><form id="create"><label for="sku" data-i18n="sku">SKU</label><input id="sku" name="sku" required pattern="[A-Z0-9\-]{1,24}" maxlength="24" placeholder="NOTEBOOK-A5"><label for="name" data-i18n="itemName">Item name</label><input id="name" name="name" required maxlength="80" placeholder="A5 notebook"><label for="total" data-i18n="unitsReceived">Units received</label><input id="total" name="quantity" type="number" min="1" max="1000000" step="1" value="10" required><button data-i18n="createStock">Create stock</button></form></section>
+<section class="card"><h2 data-i18n="reserveTitle">Reserve units</h2><form id="reserve"><label for="reserve-sku" data-i18n="item">Item</label><select id="reserve-sku" name="sku" required><option value="" data-i18n="createFirst">Create stock first</option></select><label for="quantity" data-i18n="unitsToReserve">Units to reserve</label><input id="quantity" name="quantity" type="number" min="1" max="1000000" step="1" value="1" required><p class="hint" data-i18n="reserveHint">Only available units can be reserved. Release a reservation to return all of its units to availability.</p><button data-i18n="reserveUnits">Reserve units</button></form></section>
 </div>
-<section class="card"><div class="scroll"><table><caption id="stock-caption">Inventory</caption><thead><tr><th scope="col">SKU / item</th><th scope="col">Total</th><th scope="col">Reserved</th><th scope="col">Available</th></tr></thead><tbody id="stock"></tbody></table></div><button id="refresh" class="secondary">Refresh workspace</button></section>
-<section class="card"><div class="scroll"><table><caption>Active reservations</caption><thead><tr><th scope="col">Reservation / SKU</th><th scope="col">Units</th><th scope="col">Action</th></tr></thead><tbody id="reservations"></tbody></table></div></section>
-<footer>Changes are shared with Puppet on loopback port 19104. Restarting clears this workspace. No database, cookies, or browser storage.</footer>
+<section class="card"><div class="scroll"><table><caption id="stock-caption" data-i18n="inventoryCaption">Inventory</caption><thead><tr><th scope="col" data-i18n="thSku">SKU / item</th><th scope="col" data-i18n="thTotal">Total</th><th scope="col" data-i18n="thReserved">Reserved</th><th scope="col" data-i18n="thAvailable">Available</th></tr></thead><tbody id="stock"></tbody></table></div><button id="refresh" class="secondary" data-i18n="refreshWorkspace">Refresh workspace</button></section>
+<section class="card"><div class="scroll"><table><caption data-i18n="reservationsCaption">Active reservations</caption><thead><tr><th scope="col" data-i18n="thReservation">Reservation / SKU</th><th scope="col" data-i18n="thUnits">Units</th><th scope="col" data-i18n="thAction">Action</th></tr></thead><tbody id="reservations"></tbody></table></div></section>
+<footer data-i18n="footer">Changes are shared with Puppet on loopback port 19104. Restarting clears this workspace. No database, cookies, or browser storage.</footer>
 </main>
 <script>
 'use strict';
+const I18N = {
+  en: {
+    title: 'Stockroom · Inventory & reservations',
+    heading: 'Stockroom',
+    tagline: 'A small workspace for stock and active reservations.',
+    badge: 'Local · In memory',
+    accessTitle: 'Workspace access',
+    runtimeKey: 'Runtime key',
+    useKey: 'Use key',
+    forgetKey: 'Forget key',
+    accessHint: 'Read freely on this machine. Changes require the runtime key. This page keeps it only in memory; reload to forget it. Do not save it in your browser.',
+    createTitle: 'Create stock',
+    sku: 'SKU',
+    itemName: 'Item name',
+    unitsReceived: 'Units received',
+    createStock: 'Create stock',
+    reserveTitle: 'Reserve units',
+    item: 'Item',
+    createFirst: 'Create stock first',
+    unitsToReserve: 'Units to reserve',
+    reserveHint: 'Only available units can be reserved. Release a reservation to return all of its units to availability.',
+    reserveUnits: 'Reserve units',
+    inventoryCaption: 'Inventory',
+    thSku: 'SKU / item',
+    thTotal: 'Total',
+    thReserved: 'Reserved',
+    thAvailable: 'Available',
+    refreshWorkspace: 'Refresh workspace',
+    reservationsCaption: 'Active reservations',
+    thReservation: 'Reservation / SKU',
+    thUnits: 'Units',
+    thAction: 'Action',
+    footer: 'Changes are shared with Puppet on loopback port 19104. Restarting clears this workspace. No database, cookies, or browser storage.',
+    msgEnterKey: 'Enter the runtime key before making changes.',
+    msgRequestFailed: 'Request failed ({0}).',
+    chooseItem: 'Choose an item',
+    availableSuffix: '{0} available',
+    release: 'Release',
+    releaseAria: 'Release reservation {0}',
+    msgReleased: 'Reservation released.',
+    noStock: 'No stock yet. Create your first item above.',
+    noReservations: 'No active reservations.',
+    inventoryCount: 'Inventory · {0} items',
+    msgKeyFormat: 'Key must contain 16..256 non-space ASCII characters.',
+    msgKeyHeld: 'Key held in memory. It will be checked on your next change.',
+    msgKeyForgotten: 'Key forgotten.',
+    msgStockCreated: 'Stock created.',
+    msgUnitsReserved: 'Units reserved.',
+    msgRefreshed: 'Workspace refreshed.'
+  },
+  zh: {
+    title: '库存间 · 库存与预留',
+    heading: '库存间',
+    tagline: '用于库存与活动预留的小型工作区。',
+    badge: '本地 · 内存态',
+    accessTitle: '工作区访问',
+    runtimeKey: '运行时密钥',
+    useKey: '使用密钥',
+    forgetKey: '忘记密钥',
+    accessHint: '在本机可自由读取；任何变更都需要运行时密钥。本页仅在内存中保存密钥，刷新即忘；请勿在浏览器中保存。',
+    createTitle: '创建库存',
+    sku: 'SKU',
+    itemName: '物品名称',
+    unitsReceived: '入库数量',
+    createStock: '创建库存',
+    reserveTitle: '预留数量',
+    item: '物品',
+    createFirst: '请先创建库存',
+    unitsToReserve: '预留数量',
+    reserveHint: '仅可预留可用数量。释放预留可将全部数量归还为可用。',
+    reserveUnits: '预留数量',
+    inventoryCaption: '库存',
+    thSku: 'SKU / 物品',
+    thTotal: '总量',
+    thReserved: '已预留',
+    thAvailable: '可用',
+    refreshWorkspace: '刷新工作区',
+    reservationsCaption: '活动预留',
+    thReservation: '预留 / SKU',
+    thUnits: '数量',
+    thAction: '操作',
+    footer: '变更与回环端口 19104 上的 Puppet 共享。重启会清空本工作区。无数据库、无 Cookie、无浏览器存储。',
+    msgEnterKey: '请先输入运行时密钥再进行变更。',
+    msgRequestFailed: '请求失败（{0}）。',
+    chooseItem: '选择物品',
+    availableSuffix: '可用 {0}',
+    release: '释放',
+    releaseAria: '释放预留 {0}',
+    msgReleased: '预留已释放。',
+    noStock: '暂无库存。请在上方创建第一个物品。',
+    noReservations: '暂无活动预留。',
+    inventoryCount: '库存 · {0} 项',
+    msgKeyFormat: '密钥须为 16..256 个非空格 ASCII 字符。',
+    msgKeyHeld: '密钥已保存在内存中，将在下次变更时校验。',
+    msgKeyForgotten: '密钥已忘记。',
+    msgStockCreated: '库存已创建。',
+    msgUnitsReserved: '数量已预留。',
+    msgRefreshed: '工作区已刷新。'
+  }
+};
+const LANG = (navigator.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+function t(key, ...args) {
+  let text = (I18N[LANG] && I18N[LANG][key]) || I18N.en[key] || key;
+  args.forEach((value, index) => { text = text.replace('{' + index + '}', value); });
+  return text;
+}
+document.querySelectorAll('[data-i18n]').forEach(element => { element.textContent = t(element.dataset.i18n); });
 let runtimeKey = '';
 const status = document.querySelector('#status');
 function message(text, error = false) { status.textContent = text; status.className = error ? 'error' : ''; }
 async function request(path, method = 'GET', body) {
   const headers = {};
   if (method !== 'GET') {
-    if (!runtimeKey) throw new Error('Enter the runtime key before making changes.');
+    if (!runtimeKey) throw new Error(t('msgEnterKey'));
     headers.Authorization = 'Bearer ' + runtimeKey;
   }
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -41,7 +148,7 @@ async function request(path, method = 'GET', body) {
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
     if (response.status === 401) runtimeKey = '';
-    throw new Error(problem.title || 'Request failed (' + response.status + ').');
+    throw new Error(problem.title || t('msgRequestFailed', response.status));
   }
   return response.status === 204 ? null : response.json();
 }
@@ -54,44 +161,44 @@ async function refresh() {
   const select = document.querySelector('#reserve-sku');
   const selected = select.value;
   stock.replaceChildren(); reservations.replaceChildren(); select.replaceChildren();
-  select.add(new Option('Choose an item', ''));
+  select.add(new Option(t('chooseItem'), ''));
   for (const item of data.stock) {
     const row = stock.insertRow();
     cell(row, item.sku + ' · ' + item.name); cell(row, item.total); cell(row, item.reserved); cell(row, item.available);
-    select.add(new Option(item.sku + ' · ' + item.available + ' available', item.sku));
+    select.add(new Option(item.sku + ' · ' + t('availableSuffix', item.available), item.sku));
   }
   if (data.stock.some(item => item.sku === selected)) select.value = selected;
   for (const reservation of data.reservations) {
     const row = reservations.insertRow();
     cell(row, reservation.id + ' / ' + reservation.sku).className = 'id'; cell(row, reservation.quantity);
-    const button = document.createElement('button'); button.textContent = 'Release'; button.className = 'secondary';
-    button.setAttribute('aria-label', 'Release reservation ' + reservation.id);
-    button.onclick = () => perform(button, async () => { await request('/api/reservations/' + reservation.id, 'DELETE'); await refresh(); message('Reservation released.'); });
+    const button = document.createElement('button'); button.textContent = t('release'); button.className = 'secondary';
+    button.setAttribute('aria-label', t('releaseAria', reservation.id));
+    button.onclick = () => perform(button, async () => { await request('/api/reservations/' + reservation.id, 'DELETE'); await refresh(); message(t('msgReleased')); });
     cell(row, '').append(button);
   }
-  if (!data.stock.length) empty(stock, 'No stock yet. Create your first item above.', 4);
-  if (!data.reservations.length) empty(reservations, 'No active reservations.', 3);
-  document.querySelector('#stock-caption').textContent = 'Inventory · ' + data.stock.length + ' items';
+  if (!data.stock.length) empty(stock, t('noStock'), 4);
+  if (!data.reservations.length) empty(reservations, t('noReservations'), 3);
+  document.querySelector('#stock-caption').textContent = t('inventoryCount', data.stock.length);
 }
 async function perform(button, action) { button.disabled = true; try { await action(); } catch (error) { message(error.message, true); } finally { button.disabled = false; } }
 document.querySelector('#access').onsubmit = event => {
   event.preventDefault();
   const input = document.querySelector('#key');
-  if (!/^[!-~]{16,256}$/.test(input.value)) { message('Key must contain 16..256 non-space ASCII characters.', true); return; }
-  runtimeKey = input.value; input.value = ''; message('Key held in memory. It will be checked on your next change.');
+  if (!/^[!-~]{16,256}$/.test(input.value)) { message(t('msgKeyFormat'), true); return; }
+  runtimeKey = input.value; input.value = ''; message(t('msgKeyHeld'));
 };
-document.querySelector('#forget').onclick = () => { runtimeKey = ''; document.querySelector('#key').value = ''; message('Key forgotten.'); };
+document.querySelector('#forget').onclick = () => { runtimeKey = ''; document.querySelector('#key').value = ''; message(t('msgKeyForgotten')); };
 for (const [id, path] of [['create', '/api/stock'], ['reserve', '/api/reservations']]) {
   document.getElementById(id).onsubmit = event => {
     event.preventDefault();
     const form = event.currentTarget;
     perform(form.querySelector('button'), async () => {
       const data = Object.fromEntries(new FormData(form)); data.quantity = Number(data.quantity);
-      await request(path, 'POST', data); await refresh(); message(id === 'create' ? 'Stock created.' : 'Units reserved.');
+      await request(path, 'POST', data); await refresh(); message(id === 'create' ? t('msgStockCreated') : t('msgUnitsReserved'));
     });
   };
 }
-document.querySelector('#refresh').onclick = event => perform(event.currentTarget, async () => { await refresh(); message('Workspace refreshed.'); });
+document.querySelector('#refresh').onclick = event => perform(event.currentTarget, async () => { await refresh(); message(t('msgRefreshed')); });
 window.addEventListener('pagehide', () => { runtimeKey = ''; document.querySelector('#key').value = ''; });
 refresh().catch(error => message(error.message, true));
 </script>
