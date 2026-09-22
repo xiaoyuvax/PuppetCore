@@ -2,7 +2,9 @@
 
 > 本指南的阅读对象是 **AI Agent**，不是人类开发者。所有原则、边界、规范都以"Agent 如何高效、安全地使用并迭代此框架来调试宿主工程"为准绳。开始使用前先通读全篇。
 
-> **English abstract (non-normative)** — This is the canonical, Chinese-language guide for AI agents using and iterating Puppet.Core. It covers integration modes, runtime endpoints, the Actionize paradigm, multi-agent coordination, security, and field-tested pitfalls. Porting to another language is intentionally free-form: this document is a reference example, not a frozen spec. See [README.en.md](README.en.md) for an English overview.
+> **说明**：下文所有接口、代码与工具链描述均**以 C# / .NET 环境为例**。移植到其他语言时，请将相应概念替换为你所用语言的等价物（如反射→内省、`WebServerBase`→本语言 HTTP 栈、WinForms 控件树→对应 GUI 工具包）；移植方也可直接更新本指南。
+
+> **English abstract (non-normative)** — This is the canonical, Chinese-language guide for AI agents using and iterating Puppet.Core. It covers integration modes, runtime endpoints, the Actionize paradigm, multi-agent coordination, security, and field-tested pitfalls. Porting to another language is intentionally free-form: this document is a reference example, not a frozen spec; the interface and examples use C#/.NET, and porters should substitute their own language's equivalents and may update this guide. See [README.en.md](README.en.md) for an English overview.
 
 ## 库概述
 
@@ -10,19 +12,9 @@
 
 * 目标框架：net8.0 / net9.0 / net10.0
 
-* 用途：为任意 .NET 类型（含 WinForm 窗体）提供 Agent 可操控的 WebApi 接口。通过反射自动生成能力描述，支持运行时状态查询与方法调用。
+* 用途：为宿主应用的任意类型/对象提供 Agent 可操控的 WebApi 接口——自动生成能力描述，支持运行时状态查询与方法调用。在 .NET 实现中即任意 .NET 类型（含 WinForm 窗体），能力描述经反射生成。
 
 * 定位：**这是 agent 的工具，不是给开发者用的库**。代码不追求开发者友好性，只追求 agent 友好性。Agent 在使用中根据需要主动维护与迭代本框架。
-
-## 依赖
-
-* Wima.Core（Utils、Reflection、LogExtention）
-
-* Wima.Log（独立库，仅引用；WimaLogger.LogBook、ILog）——本框架的日志体系即引入 WimaLogger
-
-* Wima.Web.Engine（WebServerBase、WebRequest/Response）
-
-* Newtonsoft.Json
 
 ## 子项目
 
@@ -162,16 +154,6 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | `lockMode` | string | `"Read"`/`"Write"`/`"None"` |
 
 > 每次调用自动更新 AgentBook 心跳，无需额外请求。
-
-### 调用约定（重要）
-
-* `/agent/invoke` 的 `name`、`method` 是**查询参数**（中文方法名需 URL 编码），`args` 放 body 的 JSON 数组。
-
-* 优先用 `/agent/get?path=<member>` 读单个值，而非序列化整对象（见「踩坑」）。
-
-* `/agent/set` 设控件值即模拟真实用户操作（会触发对应事件），用于测试现场。
-
-* async 方法：invoke 会阻塞等待 Task；无返回值时返回 `null`。
 
 ## Agent 使用与迭代原则（必读）
 
@@ -534,7 +516,7 @@ $key = (Get-Content "$env:LOCALAPPDATA\Puppet.AppAgents\<app>.<pid>.json" -Raw |
 
 ## 移植到其他语言
 
-本框架不绑定 .NET，也不要求移植者复刻本指南的端点/鉴权/响应形状——本指南只是一个"想法"的范例。需要其他语言版本时，新建对应语言项目（如 `Puppet.Py`、`Puppet.Java`、`Puppet.Go` 等等），将本指南放入该项目，由 Agent 自由发挥，或对照随本指南一并开源的 Puppet.Core C# 源码参考。语言、内部设计、甚至协议细节均由实现者自主决定。
+本框架不绑定 .NET，也不要求移植者复刻本指南的端点/鉴权/响应形状——本指南只是一个"想法"的范例。需要其他语言版本时，新建对应语言项目（如 `Puppet.Py`、`Puppet.Java`、`Puppet.Go` 等等），将本指南放入该项目，由 Agent 自由发挥，或对照随本指南一并开源的 Puppet.Core C# 源码参考。语言、内部设计、甚至协议细节均由实现者自主决定。移植方可将本指南中的 C#/.NET 描述与示例替换为自己语言的等价物，并更新本指南。
 
 ## DEBUG 工作流
 
