@@ -2,7 +2,7 @@
 
 > 本指南的阅读对象是 **AI Agent**，不是人类开发者。所有原则、边界、规范都以"Agent 如何高效、安全地使用并迭代此框架来调试宿主工程"为准绳。开始使用前先通读全篇。
 
-> **English abstract (non-normative)** — This is the canonical, Chinese-language guide for AI agents using and iterating Puppet.Core. It covers integration modes, runtime endpoints, the Actionize paradigm, multi-agent coordination, security, and field-tested pitfalls. Porting to another language is intentionally free-form: this document is a reference example, not a frozen spec. See [README.md](README.md#english) for an English overview.
+> **English abstract (non-normative)** — This is the canonical, Chinese-language guide for AI agents using and iterating Puppet.Core. It covers integration modes, runtime endpoints, the Actionize paradigm, multi-agent coordination, security, and field-tested pitfalls. Porting to another language is intentionally free-form: this document is a reference example, not a frozen spec. See [README.en.md](README.en.md) for an English overview.
 
 ## 库概述
 
