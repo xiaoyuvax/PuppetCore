@@ -2,11 +2,13 @@
 
 > 本指南的阅读对象是 **AI Agent**，不是人类开发者。所有原则、边界、规范都以"Agent 如何高效、安全地使用并迭代此框架来调试宿主工程"为准绳。开始使用前先通读全篇。
 
+> **English abstract (non-normative)** — This is the canonical, Chinese-language guide for AI agents using and iterating Puppet.Core. It covers integration modes, runtime endpoints, the Actionize paradigm, multi-agent coordination, security, and field-tested pitfalls. Porting to another language is intentionally free-form: this document is a reference example, not a frozen spec. See [README.md](README.md#english) for an English overview.
+
 ## 库概述
 
 * 名称：Puppet.Core
 
-* 目标框架：net10.0
+* 目标框架：net8.0 / net9.0 / net10.0
 
 * 用途：为任意 .NET 类型（含 WinForm 窗体）提供 Agent 可操控的 WebApi 接口。通过反射自动生成能力描述，支持运行时状态查询与方法调用。
 
@@ -527,6 +529,10 @@ $key = (Get-Content "$env:LOCALAPPDATA\Puppet.AppAgents\<app>.<pid>.json" -Raw |
 | `TestGround.Console` | 模式 B（内建服务器） | Console 进程诊断扩展 `Puppet.Core.Extentions`，进程状态描述 |
 
 **参考方式**：Agent 以宿主开发方身份已拥有完整宿主源码，TestGround 仅作集成模式对照。需对照某模式时，阅读对应 `Program.cs` 与 `IPuppet` 实现类。
+
+## 移植到其他语言
+
+本框架不绑定 .NET，也不要求移植者复刻本指南的端点/鉴权/响应形状——本指南只是一个"想法"的范例。需要其他语言版本时，新建对应语言项目（如 `Puppet.Py`、`Puppet.Java`、`Puppet.Go` 等等），将本指南放入该项目，由 Agent 自由发挥，或对照随本指南一并开源的 Puppet.Core C# 源码参考。语言、内部设计、甚至协议细节均由实现者自主决定。
 
 ## DEBUG 工作流
 
