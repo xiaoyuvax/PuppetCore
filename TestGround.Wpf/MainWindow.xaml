@@ -1,10 +1,11 @@
 <Window x:Class="TestGround.Wpf.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="页间 · 阅读清单" Width="860" Height="650" MinWidth="720" MinHeight="590"
+        xmlns:loc="clr-namespace:TestGround.Wpf"
+        Title="{loc:Tr Zh='页间 · 阅读清单', En='Reading Room · Reading list'}" Width="860" Height="650" MinWidth="720" MinHeight="590"
         WindowStartupLocation="CenterScreen" Background="#F4F3EE" Foreground="#253E3A"
         FontFamily="Microsoft YaHei UI" FontSize="14" UseLayoutRounding="True"
-        AutomationProperties.Name="页间阅读清单">
+        AutomationProperties.Name="{loc:Tr Zh='页间阅读清单', En='Reading Room reading list'}">
     <Window.Resources>
         <Style TargetType="Button">
             <Setter Property="Padding" Value="16,9" />
@@ -44,8 +45,8 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <StackPanel Margin="0,0,0,20">
-            <TextBlock Text="页间" FontSize="30" FontWeight="SemiBold" />
-            <TextBlock Text="READING ROOM  /  每一页，都是向前的一小步。" Foreground="#536A62" Margin="0,4,0,0" />
+            <TextBlock Text="{loc:Tr Zh='页间', En='Reading Room'}" FontSize="30" FontWeight="SemiBold" />
+            <TextBlock Text="{loc:Tr Zh='READING ROOM  /  每一页，都是向前的一小步。', En='READING ROOM  /  Every page is one small step forward.'}" Foreground="#536A62" Margin="0,4,0,0" />
         </StackPanel>
         <Border Grid.Row="1" Background="White" CornerRadius="10" Padding="16" Margin="0,0,0,16">
             <Grid>
@@ -55,14 +56,14 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Margin="0,0,12,0">
-                    <Label Content="书名 (_T)" Target="{Binding ElementName=TitleBox}" />
-                    <TextBox x:Name="TitleBox" Text="{Binding TitleInput, UpdateSourceTrigger=PropertyChanged}" MaxLength="120" AutomationProperties.Name="书名" />
+                    <Label Content="{loc:Tr Zh='书名 (_T)', En='Title (_T)'}" Target="{Binding ElementName=TitleBox}" />
+                    <TextBox x:Name="TitleBox" Text="{Binding TitleInput, UpdateSourceTrigger=PropertyChanged}" MaxLength="120" AutomationProperties.Name="{loc:Tr Zh='书名', En='Title'}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Margin="0,0,12,0">
-                    <Label Content="总页数 (_P)" Target="{Binding ElementName=TotalBox}" />
-                    <TextBox x:Name="TotalBox" Text="{Binding TotalInput, UpdateSourceTrigger=PropertyChanged}" MaxLength="10" AutomationProperties.Name="总页数，1 到 100000" />
+                    <Label Content="{loc:Tr Zh='总页数 (_P)', En='Total pages (_P)'}" Target="{Binding ElementName=TotalBox}" />
+                    <TextBox x:Name="TotalBox" Text="{Binding TotalInput, UpdateSourceTrigger=PropertyChanged}" MaxLength="10" AutomationProperties.Name="{loc:Tr Zh='总页数，1 到 100000', En='Total pages, 1 to 100000'}" />
                 </StackPanel>
-                <Button x:Name="AddButton" Grid.Column="2" Content="加入书架 (_A)" Click="AddClicked" VerticalAlignment="Bottom" />
+                <Button x:Name="AddButton" Grid.Column="2" Content="{loc:Tr Zh='加入书架 (_A)', En='Add to shelf (_A)'}" Click="AddClicked" VerticalAlignment="Bottom" />
             </Grid>
         </Border>
         <Grid Grid.Row="2" Margin="0,0,0,16">
@@ -72,11 +73,11 @@
             </Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center" Margin="0,0,20,0">
                 <TextBlock Text="{Binding AggregateText}" Margin="0,0,0,8" />
-                <ProgressBar Value="{Binding OverallProgress, Mode=OneWay}" AutomationProperties.Name="全部书籍按页数加权的阅读进度" />
+                <ProgressBar Value="{Binding OverallProgress, Mode=OneWay}" AutomationProperties.Name="{loc:Tr Zh='全部书籍按页数加权的阅读进度', En='Reading progress of all books weighted by pages'}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Label Content="筛选 (_F)" Target="{Binding ElementName=FilterBox}" VerticalAlignment="Center" Padding="0,0,8,0" />
-                <ComboBox x:Name="FilterBox" Width="100" Padding="7" ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" AutomationProperties.Name="阅读状态筛选" />
+                <Label Content="{loc:Tr Zh='筛选 (_F)', En='Filter (_F)'}" Target="{Binding ElementName=FilterBox}" VerticalAlignment="Center" Padding="0,0,8,0" />
+                <ComboBox x:Name="FilterBox" Width="100" Padding="7" ItemsSource="{Binding Filters}" SelectedValue="{Binding Filter, Mode=TwoWay}" SelectedValuePath="Value" DisplayMemberPath="Label" AutomationProperties.Name="{loc:Tr Zh='阅读状态筛选', En='Reading status filter'}" />
             </StackPanel>
         </Grid>
         <Grid Grid.Row="3">
@@ -91,20 +92,20 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="{Binding VisibleCount, StringFormat=书架 · {0} 本}" FontWeight="SemiBold" Margin="4,0,0,10" />
+                    <TextBlock Text="{Binding ShelfHeader}" FontWeight="SemiBold" Margin="4,0,0,10" />
                     <ListBox x:Name="BookList" Grid.Row="1" ItemsSource="{Binding Books}" SelectedItem="{Binding SelectedBook}" BorderThickness="0"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="书架，使用方向键选择书籍">
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="{loc:Tr Zh='书架，使用方向键选择书籍', En='Shelf; use the arrow keys to select a book'}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel>
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                     <TextBlock Text="{Binding PageSummary}" FontSize="12" Foreground="#536A62" Margin="0,5,0,7" />
-                                    <ProgressBar Value="{Binding Progress, Mode=OneWay}" Height="5" AutomationProperties.Name="本书阅读进度" />
+                                    <ProgressBar Value="{Binding Progress, Mode=OneWay}" Height="5" AutomationProperties.Name="{loc:Tr Zh='本书阅读进度', En='Reading progress of this book'}" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <TextBlock Grid.Row="1" Text="书架还很安静。&#10;添加一本书，或试试其他筛选。" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" IsHitTestVisible="False" Foreground="#536A62">
+                    <TextBlock Grid.Row="1" Text="{Binding EmptyShelfText}" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" IsHitTestVisible="False" Foreground="#536A62">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -121,14 +122,14 @@
             <Border Grid.Column="2" Background="#E7EEE8" CornerRadius="10" Padding="16">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
-                        <TextBlock Text="阅读进度" FontSize="12" Foreground="#536A62" Margin="0,0,0,10" />
+                        <TextBlock Text="{loc:Tr Zh='阅读进度', En='Reading progress'}" FontSize="12" Foreground="#536A62" Margin="0,0,0,10" />
                         <TextBlock Text="{Binding SelectedTitle}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,12" />
-                        <ProgressBar Value="{Binding SelectedProgress, Mode=OneWay}" AutomationProperties.Name="所选书籍阅读进度" />
-                        <Label Content="已读到第几页 (_R)" Target="{Binding ElementName=ReadBox}" Margin="0,16,0,0" />
-                        <TextBox x:Name="ReadBox" Text="{Binding ReadInput, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding HasSelection}" MaxLength="10" AutomationProperties.Name="已读页数，从零到总页数" />
-                        <Button x:Name="SaveButton" Content="更新进度 (_U)" Click="SaveClicked" IsEnabled="{Binding HasSelection}" />
-                        <Button x:Name="RemoveButton" Content="移除书籍 (_D)" Click="RemoveClicked" IsEnabled="{Binding HasSelection}" Background="White" />
+                        <ProgressBar Value="{Binding SelectedProgress, Mode=OneWay}" AutomationProperties.Name="{loc:Tr Zh='所选书籍阅读进度', En='Reading progress of the selected book'}" />
+                        <Label Content="{loc:Tr Zh='已读到第几页 (_R)', En='Read up to page (_R)'}" Target="{Binding ElementName=ReadBox}" Margin="0,16,0,0" />
+                        <TextBox x:Name="ReadBox" Text="{Binding ReadInput, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding HasSelection}" MaxLength="10" AutomationProperties.Name="{loc:Tr Zh='已读页数，从零到总页数', En='Pages read, from zero to total pages'}" />
+                        <Button x:Name="SaveButton" Content="{loc:Tr Zh='更新进度 (_U)', En='Update progress (_U)'}" Click="SaveClicked" IsEnabled="{Binding HasSelection}" />
+                        <Button x:Name="RemoveButton" Content="{loc:Tr Zh='移除书籍 (_D)', En='Remove book (_D)'}" Click="RemoveClicked" IsEnabled="{Binding HasSelection}" Background="White" />
                     </StackPanel>
                 </ScrollViewer>
             </Border>

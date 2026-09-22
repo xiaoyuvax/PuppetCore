@@ -40,7 +40,7 @@ internal static class SelfTest
         Check(form.AddTask("批量完成甲") && form.AddTask("批量完成乙") && form.SelectTask(0) && form.CompleteSelectedTask(), "seed clear-completed");
         Check(form.SelectTask(1) && form.CompleteSelectedTask() && form.CompletedCount == 2, "complete more for clear");
         Check(form.ClearCompletedTasks() == 2 && form.TotalCount == 2 && form.CompletedCount == 0, "clear completed removes all");
-        Check(form.ClearCompletedTasks() == 0 && form.StatusText == "当前没有已完成的任务。", "clear completed empty no-op");
+        Check(form.ClearCompletedTasks() == 0 && form.StatusText == Loc.T("当前没有已完成的任务。", "There are no completed tasks."), "clear completed empty no-op");
         Check(form.SelectTask(0) && form.RemoveSelectedTask() && form.SelectTask(0) && form.RemoveSelectedTask() && form.TotalCount == 0, "final cleanup");
 
         var input = (TextBox)form.Controls.Find("TaskInput", true).Single();
@@ -79,7 +79,7 @@ internal static class SelfTest
         Check(form.TotalCount == 0 && !remove.Enabled, "remove button wiring");
         form.SetFilter("全部");
 
-        if (form.AgentStatus.StartsWith("Puppet 已禁用", StringComparison.Ordinal)) return;
+        if (form.AgentStatus.StartsWith(Loc.T("Puppet 已禁用", "Puppet disabled"), StringComparison.Ordinal)) return;
         Check(form.AgentStatus.Contains("127.0.0.1:19101", StringComparison.Ordinal), "server startup");
         using var client = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:19101"), Timeout = TimeSpan.FromSeconds(10) };
         using (var unauthorized = await client.GetAsync("/agent/get?name=TaskBoard&path=TotalCount"))
@@ -195,7 +195,7 @@ internal static class SelfTest
                     .Any(p => p.GetProperty("name").GetString() == "title" && p.GetProperty("required").GetBoolean()), "title parameter required");
                 var export = actions.First(a => a.GetProperty("name").GetString() == "ExportSummary");
                 Check(export.GetProperty("desc").GetString() == "导出当前看板摘要文本文件", "L2 explicit description (attribute)");
-                Check(root.GetProperty("uiTexts").GetProperty("AddButton").GetString() == "添加", "L1 raw control text map");
+                Check(root.GetProperty("uiTexts").GetProperty("AddButton").GetString() == Loc.T("添加", "Add"), "L1 raw control text map");
             }
 
             // ---- 按名严格绑定：未知参数 400 / 缺必填 400 / 未知 action 404 ----

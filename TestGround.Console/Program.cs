@@ -31,12 +31,12 @@ internal static class Program
         Environment.SetEnvironmentVariable("PUPPET_TESTGROUND_KEY", null);
         if (key is not null && (key.Length is < 16 or > 256 || key.Any(c => c < '!' || c > '~')))
         {
-            Console.Error.WriteLine("PUPPET_TESTGROUND_KEY must contain 16..256 printable non-space ASCII characters.");
+            Console.Error.WriteLine(Loc.T("PUPPET_TESTGROUND_KEY 须为 16..256 个可打印、非空格 ASCII 字符。", "PUPPET_TESTGROUND_KEY must contain 16..256 printable non-space ASCII characters."));
             return 2;
         }
         if (key is null && (selfTest || serve))
         {
-            Console.Error.WriteLine("PUPPET_TESTGROUND_KEY is required for --self-test and --serve.");
+            Console.Error.WriteLine(Loc.T("--self-test 与 --serve 需要 PUPPET_TESTGROUND_KEY。", "PUPPET_TESTGROUND_KEY is required for --self-test and --serve."));
             return 2;
         }
         PuppetUsage.Enabled = false;
@@ -77,9 +77,9 @@ internal static class Program
                         o.AssetMaxEntryBytes = 1024;
                     });
                 if (!server.Start("127.0.0.1:19102")) throw new InvalidOperationException("Server start failed.");
-                Console.Error.WriteLine("Agent: 127.0.0.1:19102 / ExpenseLedger (AppAgent B-only, /agent/* blocked)");
+                Console.Error.WriteLine(Loc.T("Agent: 127.0.0.1:19102 / ExpenseLedger（AppAgent B-only，/agent/* 已屏蔽）", "Agent: 127.0.0.1:19102 / ExpenseLedger (AppAgent B-only, /agent/* blocked)"));
             }
-            else Console.Error.WriteLine("Agent disabled: no PUPPET_TESTGROUND_KEY; local ledger only.");
+            else Console.Error.WriteLine(Loc.T("Agent 已禁用：未提供 PUPPET_TESTGROUND_KEY；仅本地账本。", "Agent disabled: no PUPPET_TESTGROUND_KEY; local ledger only."));
             if (selfTest)
             {
                 if (bOnly)
@@ -110,7 +110,7 @@ internal static class Program
             }
             catch (Exception)
             {
-                Console.Error.WriteLine("Server shutdown failed.");
+                Console.Error.WriteLine(Loc.T("服务器关闭失败。", "Server shutdown failed."));
                 exitCode = 1;
             }
             PuppetKeyVault.RefreshKey();

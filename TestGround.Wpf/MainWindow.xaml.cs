@@ -43,7 +43,7 @@ public partial class MainWindow : Window
         Environment.SetEnvironmentVariable("PUPPET_TESTGROUND_KEY", null);
         if (string.IsNullOrWhiteSpace(key))
         {
-            _model.SetAgentStatus("Puppet 已禁用 · 未提供 PUPPET_TESTGROUND_KEY");
+            _model.SetAgentStatus(Loc.T("Puppet 已禁用 · 未提供 PUPPET_TESTGROUND_KEY", "Puppet disabled · no PUPPET_TESTGROUND_KEY"));
             return;
         }
         PuppetKeyVault.SetKey(key);
@@ -53,11 +53,11 @@ public partial class MainWindow : Window
             _server = new PuppetWebServer().UseAppAgent(o => o.ProductName = "阅读书架");
             _model.SetAgentStatus(_server.Start("127.0.0.1:19103")
                 ? "Puppet · 127.0.0.1:19103 · ReadingList"
-                : "Puppet 启动失败；本地书架仍可使用。");
+                : Loc.T("Puppet 启动失败；本地书架仍可使用。", "Puppet failed to start; the local shelf still works."));
         }
         catch (Exception)
         {
-            _model.SetAgentStatus("Puppet 启动失败；本地书架仍可使用。");
+            _model.SetAgentStatus(Loc.T("Puppet 启动失败；本地书架仍可使用。", "Puppet failed to start; the local shelf still works."));
         }
     }
 
@@ -75,7 +75,7 @@ public partial class MainWindow : Window
         }
         catch (Exception)
         {
-            _model.SetAgentStatus("Puppet 服务停止失败。");
+            _model.SetAgentStatus(Loc.T("Puppet 服务停止失败。", "Puppet service failed to stop."));
         }
         finally
         {

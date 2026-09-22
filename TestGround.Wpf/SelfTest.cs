@@ -62,15 +62,15 @@ internal static class SelfTest
             && save.IsEnabled && list.SelectedItem != null, "add button and input bindings");
         readBox.Text = "21";
         save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Check(model.SelectedReadPages == 0 && model.StatusText.Contains("整数", StringComparison.Ordinal), "UI validation");
+        Check(model.SelectedReadPages == 0 && model.StatusText.Contains(Loc.T("整数", "integer"), StringComparison.Ordinal), "UI validation");
         readBox.Text = "20";
         save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await FlushAsync(window);
         Check(model.CompletedCount == 1 && readBox.Text == "20", "save button and selection binding");
-        filter.SelectedItem = "未读完";
+        filter.SelectedValue = "未读完";
         await FlushAsync(window);
         Check(model.VisibleCount == 0 && !remove.IsEnabled, "filter binding");
-        filter.SelectedItem = "已读完";
+        filter.SelectedValue = "已读完";
         await FlushAsync(window);
         list.SelectedIndex = 0;
         await FlushAsync(window);
@@ -80,7 +80,7 @@ internal static class SelfTest
         Check(model.TotalCount == 0 && !save.IsEnabled, "remove button binding");
         model.SetFilter("全部");
 
-        if (model.AgentStatus.StartsWith("Puppet 已禁用", StringComparison.Ordinal))
+        if (model.AgentStatus.StartsWith(Loc.T("Puppet 已禁用", "Puppet disabled"), StringComparison.Ordinal))
         {
             Console.WriteLine("PASS: local mode; HTTP skipped because no runtime key was supplied.");
             return;
