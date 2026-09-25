@@ -17,7 +17,7 @@ namespace Puppet.Core.AppAgent
         public static string Build(AppAgentInstance inst)
         {
             var type = inst.Instance.GetType();
-            var (actions, states) = ActionizePolicy.Scan(type);
+            var (actions, states) = ActionizePolicy.Scan(type, inst.Instance);
             var uiTexts = LoadUiTexts(inst.Instance); // L1：WinForms 桥（非 WinForms 宿主返回空）
 
             var appInfo = type.GetCustomAttribute<PuppetAppInfoAttribute>(false)
@@ -54,8 +54,8 @@ namespace Puppet.Core.AppAgent
                 state = states.Select(s => new
                 {
                     key = s.Name,
-                    type = FriendlyStateType(s.Property.PropertyType),
-                    desc = ResolveText(s.Desc, () => Lookup(uiTexts, s.Name), s.Property.Name)
+                    type = s.Property != null ? FriendlyStateType(s.Property.PropertyType) : s.TypeName,
+                    desc = ResolveText(s.Desc, () => Lookup(uiTexts, s.Name), s.Property?.Name ?? s.Name)
                 }).ToArray(),
                 // L1 原始控件文案图（控件名 → 文案）：归属归并（哪个控件事件对应哪个 action）由提炼 Agent 在编译期
                 // 落为 L2 静态表，运行时不做事件反射归并（多播委托不可靠，提案 §3.3）。

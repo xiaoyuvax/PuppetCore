@@ -23,8 +23,12 @@ namespace Puppet.Core.AppAgent
         private const BindingFlags ScanFlags =
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
 
-        /// <summary>扫描类型，产出面向 B 的 action/state 成员清单（范式内 + 覆盖收录）</summary>
-        public static (List<ActionMember> Actions, List<StateMember> States) Scan(Type type)
+        /// <summary>
+        /// 扫描类型，产出面向 B 的 action/state 成员清单（范式内 + 覆盖收录）。
+        /// instance 非空时，若该实例具备 UI 能力（平台包注入的解析器判定），追加「UI 基础 action」
+        /// （移动/缩放/可见性/窗口态/关闭等，见 PuppetUiActions）；宿主已声明的同名 action 优先，不重复。
+        /// </summary>
+        public static (List<ActionMember> Actions, List<StateMember> States) Scan(Type type, object instance = null)
         {
             var actions = new List<ActionMember>();
             var states = new List<StateMember>();
@@ -70,6 +74,18 @@ namespace Puppet.Core.AppAgent
                     Desc = ps?.Desc,
                     Source = ps != null ? "attribute" : "pattern"
                 });
+            }
+
+            // ---- UI 基础 action（仅 GUI 类型；由 PuppetUiActions 的能力解析器判定）----
+            // 「仅 GUI 才有的基础操作默认 Actionize」：宿主无需逐窗体声明；同名宿主 action 优先。
+            if (instance != null)
+            {
+                foreach (var ba in PuppetUiActions.ForInstance(instance))
+                    if (!actions.Any(a => string.Equals(a.Name, ba.Name, StringComparison.Ordinal)))
+                        actions.Add(ba);
+                foreach (var bs in PuppetUiActions.StatesForInstance(instance))
+                    if (!states.Any(s => string.Equals(s.Name, bs.Name, StringComparison.Ordinal)))
+                        states.Add(bs);
             }
 
             return (actions, states);
@@ -129,6 +145,8 @@ namespace Puppet.Core.AppAgent
             public string Group { get; init; }
             public List<ParamInfo> Params { get; init; }
             public string Source { get; init; }
+            /// <summary>UI 基础 action 的标识（非空表示由框架合成、Method 为 null，执行走 PuppetUiActions）。</summary>
+            public string BaseAction { get; init; }
         }
 
         public sealed class StateMember
@@ -137,6 +155,10 @@ namespace Puppet.Core.AppAgent
             public PropertyInfo Property { get; init; }
             public string Desc { get; init; }
             public string Source { get; init; }
+            /// <summary>合成 state 的类型名（Property 为 null 时使用）。</summary>
+            public string TypeName { get; init; }
+            /// <summary>合成 state 的取值器（Property 为 null 时使用）。</summary>
+            public Func<object, object> ValueProvider { get; init; }
         }
 
         public sealed class ParamInfo

@@ -19,6 +19,11 @@ namespace Puppet.Core.WinForms
         /// </summary>
         /// <param name="server">PuppetWebServer 实例</param>
         public static PuppetWebServer UseFormControls(this PuppetWebServer server)
-            => server.UseHandler(req => FormPuppetWebHandler.TryHandle(ref req));
+        {
+            // 同时注入 WinForms 的 UI 能力适配器：使框架对 Form/Control 自动 Actionize UI 基础 action
+            // （移动/缩放/可见性/窗口态/关闭，面向 B /appagent/*），宿主无需逐窗体声明。
+            WinFormsPuppetUiActions.UsePuppetUiActions();
+            return server.UseHandler(req => FormPuppetWebHandler.TryHandle(ref req));
+        }
     }
 }

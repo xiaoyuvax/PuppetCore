@@ -31,16 +31,29 @@ namespace Puppet.Core.AppAgent
         public (int Status, string Body) Execute(AppAgentInstance inst, string actionName, JObject argsObj, string callId, List<DialogPreset> dialogPresets = null)
         {
             // ---- 1. 定位 action（反射缓存命中即查；签名单一，与 manifest 一致） ----
-            var (actions, _) = ActionizePolicy.Scan(inst.Instance.GetType());
+            var (actions, _) = ActionizePolicy.Scan(inst.Instance.GetType(), inst.Instance);
             var action = actions.FirstOrDefault(a => string.Equals(a.Name, actionName, StringComparison.Ordinal));
             if (action == null)
                 return Error(404, "action-not-found", $"action '{actionName}' not found",
                     "GET /appagent/manifest for available action names");
 
-            // ---- 2. 按名严格绑定参数 ----
-            var bind = BindParameters(action, argsObj);
-            if (bind.Error != null)
-                return Error(400, "parameter-binding", bind.Error, "check parameter names/required in /appagent/manifest");
+            // ---- 2. 按名严格绑定参数（UI 基础 action 走参数表；宿主 action 走方法签名） ----
+            object[] realArgs = null;
+            Dictionary<string, object> baseArgs = null;
+            if (action.BaseAction != null)
+            {
+                var (ba, be) = BindBaseParameters(action, argsObj);
+                if (be != null)
+                    return Error(400, "parameter-binding", be, "check parameter names/required in /appagent/manifest");
+                baseArgs = ba;
+            }
+            else
+            {
+                var bind = BindParameters(action, argsObj);
+                if (bind.Error != null)
+                    return Error(400, "parameter-binding", bind.Error, "check parameter names/required in /appagent/manifest");
+                realArgs = bind.Parameters;
+            }
 
             // ---- 3. 实例级强制串行（机制层，不是建议性） ----
             var gate = GetGate(inst.Name);
@@ -56,10 +69,91 @@ namespace Puppet.Core.AppAgent
                 // ---- 4. 执行（UI 线程切换复用内核 + DialogBroker 预答上下文）+ Task 解包 + 产物提取 ----
                 using (DialogBroker.Push(dialogPresets))
                 {
-                    return InvokeCore(inst, action, bind.Parameters, callId);
+                    return action.BaseAction != null
+                        ? InvokeBase(inst, action, baseArgs, callId)
+                        : InvokeCore(inst, action, realArgs, callId);
                 }
             }
             finally { gate.Release(); }
+        }
+
+        /// <summary>执行 UI 基础 action（框架合成，Method 为 null）：走 PuppetUiActions 能力分发。</summary>
+        private (int Status, string Body) InvokeBase(AppAgentInstance inst, ActionizePolicy.ActionMember action, Dictionary<string, object> args, string callId)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            OperationResult result = null;
+            object rawErr = RunOnUi(inst.Instance, () =>
+            {
+                try { result = PuppetUiActions.Execute(inst.Instance, action.BaseAction, args); return null; }
+                catch (Exception e) { return e; }
+            });
+
+            if (rawErr != null)
+            {
+                var inner = rawErr is TargetInvocationException tie
+                    ? (tie.InnerException ?? (Exception)tie)
+                    : (rawErr as Exception ?? new Exception(rawErr.ToString()));
+                return Error(500, "action-failed", inner.Message, "check application state via /appagent/state or re-run");
+            }
+
+            sw.Stop();
+            bool ok = result?.Ok ?? false;
+            string message = result?.Message ?? "done";
+            var body = new Dictionary<string, object>
+            {
+                ["ok"] = ok,
+                ["action"] = action.Name,
+                ["message"] = message,
+                ["elapsedMs"] = sw.ElapsedMilliseconds
+            };
+            if (result?.Data != null) body["data"] = result.Data;
+            if (callId != null) body["callId"] = callId;
+
+            var answered = DialogBroker.AnsweredSnapshot();
+            if (answered.Count > 0)
+                body["dialogsAnswered"] = answered.Select(r => new { r.Title, r.Answer, r.FromPreset }).ToArray();
+
+            if (!ok) body["hint"] = "check message and application state; fix inputs and retry";
+            return (200, JsonConvert.SerializeObject(body, Formatting.None));
+        }
+
+        /// <summary>UI 基础 action 的参数绑定：按 manifest 参数表（名/类型/必填）严格绑定。</summary>
+        private (Dictionary<string, object> Args, string Error) BindBaseParameters(ActionizePolicy.ActionMember action, JObject argsObj)
+        {
+            var result = new Dictionary<string, object>();
+            var supplied = argsObj?.Properties().ToDictionary(p => p.Name, p => p.Value)
+                        ?? new Dictionary<string, JToken>();
+
+            foreach (var p in action.Params)
+            {
+                if (supplied.TryGetValue(p.Name, out var token))
+                {
+                    supplied.Remove(p.Name);
+                    try { result[p.Name] = ConvertBase(p.Type, token); }
+                    catch (Exception ex) { return (null, $"cannot convert parameter '{p.Name}' to {p.Type}: {ex.Message}"); }
+                }
+                else if (p.Required)
+                {
+                    return (null, $"missing required parameter '{p.Name}'");
+                }
+            }
+
+            if (supplied.Count > 0)
+                return (null, $"unknown parameter(s): {string.Join(", ", supplied.Keys)} (manifest names only)");
+
+            return (result, null);
+        }
+
+        private static object ConvertBase(string friendlyType, JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return null;
+            return friendlyType switch
+            {
+                "integer" => token.ToObject<int>(),
+                "boolean" => token.ToObject<bool>(),
+                "number" => token.ToObject<double>(),
+                _ => token.ToString()
+            };
         }
 
         private (int Status, string Body) InvokeCore(AppAgentInstance inst, ActionizePolicy.ActionMember action, object[] args, string callId)
