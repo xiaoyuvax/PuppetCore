@@ -109,6 +109,7 @@ Puppet.Core 走的是另一条路——**把"动作"提升为一等公民**（Ac
 * **动作即接口**：事件处理器里的业务逻辑提炼为 `public` + 成败返回（`bool` / `OperationResult` / `Task<…>`）的方法，即**自动**进入能力目录 `GET /appagent/manifest`；Agent 按动作名与参数调用 `POST /appagent/actions/{name}`
 * **模态框可代理**：带对话框的入口以 `PuppetDialog.Ask` 替代 `MessageBox.Show`，Agent 经 `dialogs` 预答表代答，**永不阻塞**
 * **零配置发现**：枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json` 即得 `{app, endpoint, key}`（用户档案 ACL 隔离）；用户只需说"访问本地 9090 端口了解详情"
+* **基础窗体操作内置**：GUI 宿主（WinForms 用 `UseFormControls()` 自动接入）**无需手写**即可获得框架合成的通用动作——移动 / 缩放 / 边界 / 显隐 / 启用 / 焦点 / 窗口状态 / 激活 / 置顶 / 标题 / 不透明度 / 关闭（破坏性带 `confirm`），以及多屏状态 `ScreenCount` / `Screens`；非窗体类型不受影响
 
 | 端点 | 凭证 | 说明 |
 | ---- | ---- | ---- |

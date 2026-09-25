@@ -109,6 +109,7 @@ Puppet.Core takes a different route — it promotes **actions to first-class cit
 * **Actions are the interface**: business logic inside event handlers, once lifted into `public` methods returning a success/failure type (`bool` / `OperationResult` / `Task<…>`), is **automatically** published in the capability catalog `GET /appagent/manifest`; agents invoke it via `POST /appagent/actions/{name}`
 * **Modal dialogs are proxyable**: entry points use `PuppetDialog.Ask` instead of `MessageBox.Show`, so an agent answers through the `dialogs` preset table and **never blocks**
 * **Zero-configuration discovery**: enumerate `%LOCALAPPDATA%\Puppet.AppAgents\*.json` to get `{app, endpoint, key}` (isolated by user-profile ACLs); the user just says "look at local port 9090"
+* **Built-in window actions**: a GUI host (WinForms via `UseFormControls()`) gets framework-synthesized generic actions for free — move / resize / bounds / show-hide / enable / focus / window state / activate / top-most / title / opacity / close (destructive ones take `confirm`), plus the multi-monitor states `ScreenCount` / `Screens`; non-window types are unaffected
 
 | Endpoint | Credential | Description |
 | ---- | ---- | ---- |

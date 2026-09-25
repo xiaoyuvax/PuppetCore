@@ -61,5 +61,7 @@ dotnet nuget push "<PackagePath>.nupkg" --api-key "<KEY>" --source "https://api.
 
 - `Puppet.Common.targets` — 全局版本、TFM、AOT/Trim 配置
 - 各项目 `GlobalUsing.cs` — 全局 `using JSN = Newtonsoft.Json;`
+- `Puppet.Core/AppAgent/PuppetUiActions.cs` — UI 基础 action 能力抽象（`IPuppetUiElement`/`IPuppetWindow` + 平台解析器注入点；跨 WinForms/WPF/Web）
+- `Puppet.Core.WinForms/WinFormsPuppetUiActions.cs` — WinForms 适配（`UseFormControls()` 自动注入 Form/Control 能力）
 - `D:\PUB\Nuget Packages\push.cmd` — NuGet API Key 存放（不入库）
 - `D:\PUB\Nuget Packages` — 固定打包输出目录

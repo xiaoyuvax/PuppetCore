@@ -416,6 +416,31 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 
 参考实现：`TestGround.Winform`（双面向并存演示：范式自动收录 + `[PuppetAction]` 补漏 + 产物下载 + SelfTest 锁定 A/B 行为）；设计全录见仓库 `DUAL-ASPECT-PROPOSAL.md`（v1.0）。
 
+### UI 基础 action（跨平台能力抽象；仅 GUI 默认 Actionize）
+
+「移动 / 缩放 / 最大化 / 最小化 / 还原 / 置顶 / 标题 / 透明度 / 激活 / 聚焦 / 关闭」这类**仅 GUI 才存在**的基础操作，由框架自动 Actionize，**宿主无需逐窗体声明**。它与 UI 平台无关（WinForms / WPF / Web 均适用），故在核心库定义**能力抽象**，平台包注入适配器：
+
+- `IPuppetUiElement`：`X/Y/Width/Height` + `Visible` / `Enabled` + `Move` / `Resize` / `SetBounds` / `Focus`
+  → `MoveAction` / `ResizeAction` / `SetBoundsAction` / `SetVisibleAction` / `SetEnabledAction` / `FocusAction`
+- `IPuppetWindow : IPuppetUiElement`：`WindowState`(Normal/Maximized/Minimized) / `TopMost` / `Title` / `Opacity` / `Activate` / `Close`
+  → 追加 `SetWindowStateAction(state: max|min|normal)` / `SetTopMostAction(on)` / `SetTitleAction(title)` / `SetOpacityAction(opacity)` / `ActivateAction` / `CloseWindowAction(confirm?)`
+
+**屏幕环境（多屏感知）**：UI 能力实例自动带两个只读 state（`ScreensProvider` 注入时）——
+- `ScreenCount`（integer）：显示器数量（1=单屏，>1=多屏）
+- `Screens`（string）：各屏 `[索引] 设备名 bounds=x,y,w×h work=x,y,w×h primary?`；Agent 按需读 `/appagent/state/Screens`，据此把窗口摆到指定屏幕。
+
+接入（平台包设置解析器：实例 → 能力，返回 null 表示该实例无 UI 能力）：
+- `PuppetUiActions.UiElementResolver` / `WindowResolver` / `Confirm`（关闭确认，未注入按安全默认拒绝）/ `ScreensProvider`（屏幕枚举）。
+- WinForms 包：`UseFormControls()` 自动调用 `WinFormsPuppetUiActions.UsePuppetUiActions()`，把 `Form` / `Control` 适配为上述能力并注入 `Screen.AllScreens`。WPF / Web 包照此提供适配器（`Window` / `FrameworkElement`；DOM rect / CSS display / fullscreen）。
+
+规则：
+- `ActionizePolicy.Scan(type, instance)` 在 `instance` 具备 UI 能力时追加这些基础 action 与屏幕 state；**宿主已声明的同名成员优先**（不重复）。
+- **无界面类型不受影响**：Actionize（业务 action + state）对**所有** IPuppet 类型都适用且完整；UI 基础 action 只是 GUI 类型的**增量**。
+- 坐标语义由适配器定义：WinForms `Form.Bounds` 为屏幕坐标、`Control.Bounds` 为父容器坐标；`SetWindowStateAction` 会先还原 `Normal` 再改几何（最大化/最小化下改 Bounds 无效）。
+- 关闭属破坏性操作：`confirm=null` 走 `PuppetUiActions.Confirm`（Agent 上下文由 DialogBroker 按安全默认 No 自动应答，永不因模态框挂死）。
+
+已实测（`TestGround.Winform` / VeniceMan）：`MoveAction` / `SetBoundsAction` / `SetWindowStateAction` / `SetVisibleAction` / `SetEnabledAction` / `SetTopMostAction` / `SetTitleAction` / `SetOpacityAction` / `ActivateAction` / `CloseWindowAction(confirm:false)` 均生效；多屏下 `ScreenCount` / `Screens` 返回各屏几何。
+
 ### Actionize 覆盖度扫描（找出"未覆盖的用户操作"）
 
 > B 通道要求"用户能做的都能被 Agent 做"。但 **Actionize 不是穷举 UI，而是扫描已存在的 public 业务方法**——两者之间有一条缝。本节给出可复现的扫描流程，用于把缝里的缺口找出来。**只做只读扫描，不改宿主行为。**

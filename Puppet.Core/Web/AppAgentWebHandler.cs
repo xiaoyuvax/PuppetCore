@@ -135,7 +135,7 @@ namespace Puppet.Core.Web
         // ---- state：简单类型属性直读（文本聊天视图；复杂类型不序列化对象图，与内核 GetProperty 同哲学） ----
         private static bool HandleState(WebRequest req, AppAgent.AppAgentInstance inst, string key)
         {
-            var (_, states) = AppAgent.ActionizePolicy.Scan(inst.Instance.GetType());
+            var (_, states) = AppAgent.ActionizePolicy.Scan(inst.Instance.GetType(), inst.Instance);
             var state = states.FirstOrDefault(s => string.Equals(s.Name, key, StringComparison.Ordinal));
             if (state == null)
             {
@@ -147,7 +147,13 @@ namespace Puppet.Core.Web
             object value = null;
             object rawErr = RunOnUi(inst.Instance, () =>
             {
-                try { value = state.Property.GetValue(inst.Instance); return null; }
+                try
+                {
+                    value = state.Property != null
+                        ? state.Property.GetValue(inst.Instance)
+                        : state.ValueProvider?.Invoke(inst.Instance);
+                    return null;
+                }
                 catch (Exception e) { return e; }
             });
             if (rawErr != null)
@@ -164,7 +170,7 @@ namespace Puppet.Core.Web
                 ok = true,
                 key = state.Name,
                 value,
-                type = state.Property.PropertyType.Name
+                type = state.Property != null ? state.Property.PropertyType.Name : state.TypeName
             }, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Include }));
             req.Response.SetJsonContent();
             return true;

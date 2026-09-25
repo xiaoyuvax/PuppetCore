@@ -10,7 +10,7 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<TrimmerRootAssembly>$(AssemblyName)</TrimmerRootAssembly>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-		<Version>1.2.5</Version>
+		<Version>1.2.7</Version>
 		<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 		<Description>Puppet Agent 操控框架</Description>
 	</PropertyGroup>
