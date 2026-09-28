@@ -1,5 +1,8 @@
 <Solution>
   <Project Path="Puppet.Core/Puppet.Core.csproj" />
+  <Folder Name="/tests/">
+    <Project Path="tests/Puppet.Core.Tests/Puppet.Core.Tests.csproj" />
+  </Folder>
   <Project Path="Puppet.Core.WinForms/Puppet.Core.WinForms.csproj" />
   <Project Path="TestGround.Winform/TestGround.Winform.csproj" />
   <Project Path="TestGround.Console/TestGround.Console.csproj" />
