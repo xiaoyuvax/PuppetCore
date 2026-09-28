@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Puppet.Core.AppAgent;
 using Puppet.Core.Describe;
 using Puppet.Core.Extentions;
 using Puppet.Core.Usage;
@@ -193,6 +194,13 @@ namespace Puppet.Core.Web
             if (target == null || !PuppetKeyVault.Authorize(target, key))
             { req.Response.SetStatus404(); return true; }
 
+            // 模态框代理（A 通道，2026-09-28）：与 B 通道 AppAgentExecutor 同语义——agent 触发的
+            // PuppetDialog.Ask 按安全默认（Cancel/No）自动应答，永不阻塞 UI/Web 线程。
+            // 旧根因：A 通道无 DialogBroker 上下文，宿主代码里的原生模态会挂死调用线程
+            // （VDH SaveV3dDocument 弹 OK 框挂 HTTP 线程、TE 退出菜单确认框挂死——均此根因）。
+            // AsyncLocal 作用域随 RunOnUi 的 UI 线程编组流动（Invoke/Set/control 均经此路径），
+            // 请求结束即还原；人工界面操作不走 /agent/*，原生模态行为不变。
+            using (DialogBroker.Push(null))
             switch (req.Path)
             {
                 case "/agent/describe" when req.Method == "GET":
