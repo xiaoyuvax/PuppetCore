@@ -21,18 +21,13 @@ jobs:
         with:
           dotnet-version: ${{ matrix.dotnet }}
 
-      - name: Setup NuGet sources (local Wima packages fallback)
-        shell: pwsh
-        run: |
-          # 仓库 NuGet.config 引用本地目录 D:\PUB\Nuget Packages（仅本机存在）。
-          # CI 上还原走 nuget.org；若 Wima.* 包未发布到 nuget.org，则此步失败并给出明确提示。
-          Write-Host "Using repo NuGet.config; CI restores from nuget.org"
-
-      - name: Restore
-        run: dotnet restore PuppetCore.slnx
+      # 仓库 NuGet.config 含本机源 D:\PUB\Nuget Packages（CI 不存在）。
+      # CI 还原显式指定 nuget.org 覆盖之；Wima.* 依赖均已发布到 nuget.org（实测 200）。
+      - name: Restore (nuget.org only; bypass local machine source)
+        run: dotnet restore PuppetCore.slnx --source https://api.nuget.org/v3/index.json
 
       - name: Build (Release)
-        run: dotnet build PuppetCore.slnx -c Release --no-restore
+        run: dotnet build PuppetCore.slnx -c Release --no-restore --source https://api.nuget.org/v3/index.json
 
-      - name: Test (net8.0 + net10.0 per matrix TFM availability)
+      - name: Test
         run: dotnet test tests/Puppet.Core.Tests/Puppet.Core.Tests.csproj -c Release --no-build
