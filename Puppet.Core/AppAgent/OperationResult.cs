@@ -21,7 +21,7 @@ namespace Puppet.Core.AppAgent
 
     /// <summary>
     /// 二进制产物：具名 action 返回（直接返回或内嵌 OperationResult.Data），框架存入 AppAgentAssetStore
-    /// 并在响应中回传 /appagent/assets/{id} 下载 URL。内存态模拟磁盘文件下载（visualdatahub 先例内化）。
+    /// 并在响应中回传 /appagent/assets/{id} 下载 URL。内存字节模拟为可下载 asset（等同磁盘文件，来源是内存）。
     /// </summary>
     public sealed class PuppetArtifact
     {
