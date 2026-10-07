@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Linq;
 using System.Windows.Forms;
 using Puppet.Core.AppAgent;
@@ -30,6 +31,7 @@ namespace Puppet.Core.WinForms
                 _ => null
             };
             PuppetUiActions.WindowResolver = o => o is Form f ? new WinFormsWindow(f) : null;
+            PuppetUiActions.CaptureResolver = o => o is Control c ? new WinFormsCapture(c) : null;
             PuppetUiActions.Confirm ??= (owner, text, caption) =>
                 PuppetDialog.Ask(owner as IWin32Window, text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                     == DialogResult.Yes;
@@ -112,6 +114,45 @@ namespace Puppet.Core.WinForms
             }
             public void Activate() => F.Activate();
             public void Close() => F.Close();
+        }
+
+        /// <summary>
+        /// 截屏适配：用 <see cref="Control.DrawToBitmap"/> 读取该控件**自身已绘制的像素**——
+        /// 不读取桌面、不读取其他窗口，因此不产生整屏大图，也不遮挡任何界面。
+        /// 限制：独立句柄子窗（下拉、工具提示）与 GPU 加速内容不在绘制结果内。
+        /// </summary>
+        internal sealed class WinFormsCapture : IPuppetCapture
+        {
+            private readonly Control C;
+            public WinFormsCapture(Control c) => C = c;
+
+            public PuppetArtifact Capture(int x, int y, int width, int height)
+            {
+                if (C.Width <= 0 || C.Height <= 0)
+                    throw new InvalidOperationException("控件尺寸为空，无法截取");
+
+                using var full = new Bitmap(C.Width, C.Height);
+                C.DrawToBitmap(full, new Rectangle(0, 0, C.Width, C.Height));
+
+                Bitmap shot = full, owned = null;
+                if (width > 0 && height > 0)
+                {
+                    var rect = Rectangle.Intersect(new Rectangle(x, y, width, height),
+                                                   new Rectangle(0, 0, full.Width, full.Height));
+                    if (rect.Width <= 0 || rect.Height <= 0)
+                        throw new ArgumentException("截取区域完全落在元素之外");
+                    shot = full.Clone(rect, PixelFormat.Format32bppPArgb);
+                    owned = shot;
+                }
+
+                try
+                {
+                    using var ms = new System.IO.MemoryStream();
+                    shot.Save(ms, ImageFormat.Png);
+                    return new PuppetArtifact("capture.png", "image/png", ms.ToArray());
+                }
+                finally { owned?.Dispose(); }
+            }
         }
     }
 }

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title data-i18n="title">Stockroom · Inventory & reservations</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#1c3040;background:#eef3f6;color-scheme:light}*{box-sizing:border-box}body{margin:0}main{max-width:1080px;margin:auto;padding:36px 20px}header{display:flex;align-items:center;justify-content:space-between;gap:20px}h1{margin:0;font-size:2.5rem;letter-spacing:-.06em}h2{font-size:1.1rem;margin:0 0 18px}p{color:#516475;line-height:1.6}.badge{background:#d6ede4;color:#185d47;padding:8px 14px;border-radius:24px;white-space:nowrap}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.card{background:white;border:1px solid #dce5ec;border-radius:18px;padding:24px;margin:20px 0;box-shadow:0 6px 20px #20304006}label{display:block;font-size:.88rem;font-weight:600;margin:12px 0 6px}input,select,button{font:inherit;min-height:44px;border-radius:8px}input,select{width:100%;padding:10px;border:1px solid #8e9eab;background:white;color:inherit}button{padding:10px 18px;border:0;background:#146950;color:white;cursor:pointer;margin-top:16px;font-weight:600}button.secondary{background:#e7eff4;color:#243e52}button:disabled{opacity:.55;cursor:wait}:focus-visible{outline:3px solid #407cc4;outline-offset:3px}.row{display:flex;gap:12px;align-items:end}.row>div{flex:1}.row button{flex-shrink:0}.hint{font-size:.85rem;margin-bottom:0}#status{min-height:28px;margin:8px 0;color:#16533f}#status.error{color:#a12c20}.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:12px 10px;border-bottom:1px solid #e3eaf0}th{font-size:.8rem;text-transform:uppercase;color:#516475}td button{margin:0;min-height:36px;padding:6px 12px}caption{text-align:left;padding:0 0 16px;font-weight:650}.empty{padding:20px;color:#516475}.id{font-family:monospace;font-size:.8rem}footer{font-size:.85rem;color:#516475}@media(max-width:680px){.grid{grid-template-columns:1fr;gap:0}header{align-items:start;flex-direction:column}.row{flex-wrap:wrap}.card{padding:18px}h1{font-size:2rem}}
+:root{font-family:system-ui,sans-serif;color:#1c3040;background:#eef3f6;color-scheme:light}*{box-sizing:border-box}body{margin:0}main{max-width:1080px;margin:auto;padding:36px 20px}header{display:flex;align-items:center;justify-content:space-between;gap:20px}h1{margin:0;font-size:2.5rem;letter-spacing:-.06em}h2{font-size:1.1rem;margin:0 0 18px}p{color:#516475;line-height:1.6}.badge{background:#d6ede4;color:#185d47;padding:8px 14px;border-radius:24px;white-space:nowrap}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.card{background:white;border:1px solid #dce5ec;border-radius:18px;padding:24px;margin:20px 0;box-shadow:0 6px 20px #20304006}label{display:block;font-size:.88rem;font-weight:600;margin:12px 0 6px}input,select,button{font:inherit;min-height:44px;border-radius:8px}input,select{width:100%;padding:10px;border:1px solid #8e9eab;background:white;color:inherit}button{padding:10px 18px;border:0;background:#146950;color:white;cursor:pointer;margin-top:16px;font-weight:600}button.secondary{background:#e7eff4;color:#243e52}button:disabled{opacity:.55;cursor:wait}:focus-visible{outline:3px solid #407cc4;outline-offset:3px}.row{display:flex;gap:12px;align-items:end}.row>div{flex:1}.row button{flex-shrink:0}.hint{font-size:.85rem;margin-bottom:0}.optin{display:flex;align-items:center;gap:8px;margin-top:16px}.optin input{width:auto;min-height:auto;margin:0}.optin label{display:inline-block;margin:0;font-size:.85rem;font-weight:400;color:#516475}#status{min-height:28px;margin:8px 0;color:#16533f}#status.error{color:#a12c20}.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:12px 10px;border-bottom:1px solid #e3eaf0}th{font-size:.8rem;text-transform:uppercase;color:#516475}td button{margin:0;min-height:36px;padding:6px 12px}caption{text-align:left;padding:0 0 16px;font-weight:650}.empty{padding:20px;color:#516475}.id{font-family:monospace;font-size:.8rem}footer{font-size:.85rem;color:#516475}@media(max-width:680px){.grid{grid-template-columns:1fr;gap:0}header{align-items:start;flex-direction:column}.row{flex-wrap:wrap}.card{padding:18px}h1{font-size:2rem}}
 </style>
 </head>
 <body>
@@ -15,6 +15,8 @@
 <h2 id="access-title" data-i18n="accessTitle">Workspace access</h2>
 <form id="access"><div class="row"><div><label for="key" data-i18n="runtimeKey">Runtime key</label><input id="key" type="password" autocomplete="off" minlength="16" maxlength="256" required placeholder="PUPPET_TESTGROUND_KEY"></div><button data-i18n="useKey">Use key</button><button class="secondary" type="button" id="forget" data-i18n="forgetKey">Forget key</button></div></form>
 <p class="hint" data-i18n="accessHint">Read freely on this machine. Changes require the runtime key. This page keeps it only in memory; reload to forget it. Do not save it in your browser.</p>
+<p class="optin"><input id="allow-shot" type="checkbox"><label for="allow-shot" data-i18n="allowShot">Allow Puppet to capture this page image</label></p>
+<p class="hint" data-i18n="shotHint">Off by default. While it is on, this page answers a local capture request about once a second. Puppet cannot switch it on by itself.</p>
 </section>
 <div id="status" role="status" aria-live="polite"></div>
 <div class="grid">
@@ -38,6 +40,8 @@ const I18N = {
     useKey: 'Use key',
     forgetKey: 'Forget key',
     accessHint: 'Read freely on this machine. Changes require the runtime key. This page keeps it only in memory; reload to forget it. Do not save it in your browser.',
+    allowShot: 'Allow Puppet to capture this page image',
+    shotHint: 'Off by default. While it is on, this page answers a local capture request about once a second. Puppet cannot switch it on by itself.',
     createTitle: 'Create stock',
     sku: 'SKU',
     itemName: 'Item name',
@@ -87,6 +91,8 @@ const I18N = {
     useKey: '使用密钥',
     forgetKey: '忘记密钥',
     accessHint: '在本机可自由读取；任何变更都需要运行时密钥。本页仅在内存中保存密钥，刷新即忘；请勿在浏览器中保存。',
+    allowShot: '允许 Puppet 获取本页渲染截图',
+    shotHint: '默认关闭。开启期间本页每秒约响应一次本地截图请求；Puppet 无法自行开启。',
     createTitle: '创建库存',
     sku: 'SKU',
     itemName: '物品名称',
@@ -199,7 +205,70 @@ for (const [id, path] of [['create', '/api/stock'], ['reserve', '/api/reservatio
   };
 }
 document.querySelector('#refresh').onclick = event => perform(event.currentTarget, async () => { await refresh(); message(t('msgRefreshed')); });
-window.addEventListener('pagehide', () => { runtimeKey = ''; document.querySelector('#key').value = ''; });
+let shotAllowed = false;
+let shotTimer = 0;
+async function capturePage(region) {
+  const root = document.documentElement;
+  const width = root.scrollWidth;
+  const height = root.scrollHeight;
+  const clone = root.cloneNode(true);
+  const source = [root, ...root.querySelectorAll('*')];
+  const target = [clone, ...clone.querySelectorAll('*')];
+  for (let i = 0; i < source.length; i++) {
+    if (target[i].tagName === 'SCRIPT') { target[i].remove(); continue; }
+    const computed = getComputedStyle(source[i]);
+    let css = '';
+    for (const name of computed) css += name + ':' + computed.getPropertyValue(name) + ';';
+    target[i].style.cssText = css;
+    const node = target[i];
+    const live = source[i];
+    if (node instanceof HTMLInputElement) {
+      if (node.type !== 'password') node.setAttribute('value', live.value);
+      if (node.type === 'checkbox' || node.type === 'radio') node.toggleAttribute('checked', live.checked);
+    } else if (node instanceof HTMLSelectElement) {
+      node.querySelectorAll('option').forEach((option, index) => option.toggleAttribute('selected', !!live.options[index] && live.options[index].selected));
+    }
+  }
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><foreignObject width="' + width + '" height="' + height + '">' + new XMLSerializer().serializeToString(clone) + '</foreignObject></svg>';
+  const fault = new DOMParser().parseFromString(svg, 'image/svg+xml').querySelector('parsererror');
+  if (fault) throw new Error('svg-invalid: ' + fault.textContent.slice(0, 200));
+  let bitmap;
+  const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  try {
+    bitmap = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('svg image failed'));
+      image.src = svgUrl;
+    });
+  } catch (failure) {
+    throw new Error('decode-failed: ' + (failure && failure.message) + ' svgLen=' + svg.length);
+  }
+  const x = Math.max(0, region.x | 0);
+  const y = Math.max(0, region.y | 0);
+  const w = region.width > 0 ? Math.min(region.width, width - x) : width - x;
+  const h = region.height > 0 ? Math.min(region.height, height - y) : height - y;
+  if (w < 1 || h < 1) throw new Error('empty capture region');
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d').drawImage(bitmap, x, y, w, h, 0, 0, w, h);
+  return canvas.toDataURL('image/png');
+}
+async function shotTick() {
+  if (!shotAllowed) return;
+  try {
+    const pending = await request('/api/screenshot/pending');
+    if (pending) await request('/api/screenshot', 'POST', { id: pending.id, png: await capturePage(pending) });
+  } catch (error) { message(error.message, true); }
+  shotTimer = window.setTimeout(shotTick, 1000);
+}
+document.querySelector('#allow-shot').onchange = event => {
+  shotAllowed = event.currentTarget.checked;
+  window.clearTimeout(shotTimer);
+  if (shotAllowed) shotTick();
+};
+window.addEventListener('pagehide', () => { shotAllowed = false; window.clearTimeout(shotTimer); runtimeKey = ''; document.querySelector('#key').value = ''; });
 refresh().catch(error => message(error.message, true));
 </script>
 </body>

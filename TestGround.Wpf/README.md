@@ -8,8 +8,10 @@
 
 ```powershell
 dotnet build TestGround.Wpf.csproj -c Release
-dotnet bin/Release/net10.0-windows/TestGround.Wpf.dll
+.\bin\Release\net10.0-windows\TestGround.Wpf.exe
 ```
+
+日常启动用 `.exe`（WinExe，无控制台窗口）。用 `dotnet bin\Release\net10.0-windows\TestGround.Wpf.dll` 启动会由 dotnet 宿主（控制台子系统）弹出命令行窗口显示日志；仅自检为读取 PASS/FAIL 输出才用它。
 
 书名去除首尾空白后为 1–120 字，不允许控制字符或忽略大小写的重名；总页数为 1–100000 整数，已读页数为 0–总页数，可调低以纠错。新增自动切回全部并选中；筛选隐藏所选书时清空选择。数据仅存内存，关闭即丢失，移除不提供撤销。
 
@@ -19,4 +21,4 @@ dotnet bin/Release/net10.0-windows/TestGround.Wpf.dll
 
 Agent 使用 Bearer 鉴权调用 `/agent/invoke?name=ReadingList&method=AddBook`，JSON 数组参数例如 `["小王子","100"]`。其余用户操作为 `SelectBook(index)`（当前可见列表零基索引）、`UpdateProgress(readPages)`、`SetFilter(filter)`、`RemoveSelectedBook()`；页数参数为字符串，与 UI 输入共用验证。筛选值为“全部 / 未读完 / 已读完”。观察使用 `/agent/get?name=ReadingList&path=SelectedReadPages` 等标量属性，不序列化整个 Window，不提供 `/agent/control`。
 
-运行自检与实际结果见 DEVELOPMENT.md；约束见 AGENTS.md。项目未加入解决方案，不打包，无新增直接 NuGet 依赖，只引用 Puppet.Core。
+运行自检与实际结果见 DEVELOPMENT.md；约束见 AGENTS.md。项目未加入解决方案，不打包，无新增直接 NuGet 依赖，只引用 Puppet.Core 与 Puppet.Core.Wpf。

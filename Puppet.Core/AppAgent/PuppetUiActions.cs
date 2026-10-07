@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json.Linq;
+using Puppet.Core.Describe;
 
 namespace Puppet.Core.AppAgent
 {
@@ -89,12 +91,29 @@ namespace Puppet.Core.AppAgent
     }
 
     /// <summary>
+    /// 截屏能力：把自身（窗口/元素）当前绘制结果渲染为 PNG 产物。
+    /// 这是**应用侧自身的映像**——只读取本程序已绘制的像素，不捕获桌面、不读取其他窗口、
+    /// 不遮挡任何界面，因此与用户操作互不干扰；多屏环境下也不会产生整屏尺寸的巨图。
+    /// 由平台包实现（WinForms / WPF 等），或由宿主自行实现。
+    /// </summary>
+    public interface IPuppetCapture
+    {
+        /// <summary>
+        /// 截取像素为 PNG 产物。
+        /// region 语义：x/y 相对该元素左上角；width/height &lt;= 0 表示整个元素。
+        /// </summary>
+        PuppetArtifact Capture(int x, int y, int width, int height);
+    }
+
+    /// <summary>
     /// B 面「UI 基础 action」：由 Puppet.Core 定义**能力抽象**（UI 无关），平台包注入解析器把实例
     /// 适配为 <see cref="IPuppetUiElement"/> / <see cref="IPuppetWindow"/>；框架据此**自动 Actionize**
     /// （宿主无需逐窗体声明）。无 UI 能力的类型不受影响（Actionize 依旧完整，只是没有几何类基础 action）。
     /// 原则：**仅 GUI 才有的基础操作默认 Actionize**。
     /// 与 UI 平台无关——WinForms（Form/Control）、WPF（Window/FrameworkElement）、Web（DOM rect / CSS display / fullscreen）
     /// 都可提供适配。
+    /// 另提供 A 面**合成方法** <see cref="CaptureAction"/>：经 <see cref="DescribeSynthetic"/> 进 /agent/describe、
+    /// 经 <see cref="InvokeSynthetic"/> 由 /agent/invoke 分派（探测用途，刻意不进 B 面 manifest）。
     /// </summary>
     public static class PuppetUiActions
     {
@@ -109,6 +128,9 @@ namespace Puppet.Core.AppAgent
 
         /// <summary>平台包注入：枚举显示器（供 Agent 了解单屏/多屏环境）。未注入则不提供屏幕 state。</summary>
         public static Func<IReadOnlyList<PuppetScreen>> ScreensProvider { get; set; }
+
+        /// <summary>平台包注入：实例 → 截屏能力（返回 null 表示该实例不支持截屏，A 面不提供 <see cref="CaptureAction"/>）。</summary>
+        public static Func<object, IPuppetCapture> CaptureResolver { get; set; }
 
         // ---- action 名（稳定契约）----
         /// <summary>移动 UI 元素到 (x, y)。</summary>
@@ -135,6 +157,8 @@ namespace Puppet.Core.AppAgent
         public const string SetTitleAction = "SetTitleAction";
         /// <summary>设置窗口不透明度（0.0~1.0）。</summary>
         public const string SetOpacityAction = "SetOpacityAction";
+        /// <summary>截取自身像素为 PNG（A 面合成方法；非实例成员，刻意不进 B 面 manifest）。</summary>
+        public const string CaptureAction = "CaptureAction";
 
         internal const string GroupName = "UI";
 
@@ -308,6 +332,67 @@ namespace Puppet.Core.AppAgent
                 default:
                     return null;
             }
+        }
+
+        // ---- A 面合成方法桥（/agent/describe · /agent/invoke）----
+        // describe 与 invoke 共用同一份参数顺序表（A 面按位置绑定），改这里两处同时生效。
+
+        private static readonly (string Name, string Summary)[] CaptureParams =
+        {
+            ("x", "区域左上角 X（相对该元素左上角）；省略 = 0"),
+            ("y", "区域左上角 Y（相对该元素左上角）；省略 = 0"),
+            ("width", "区域宽；<=0 或省略 = 整个元素"),
+            ("height", "区域高；<=0 或省略 = 整个元素")
+        };
+
+        /// <summary>A 面 describe 合成成员：该实例可提供的框架合成方法（无截屏能力返回空表）。</summary>
+        public static List<MethodDesc> DescribeSynthetic(object instance)
+        {
+            var list = new List<MethodDesc>();
+            if (instance == null || CaptureResolver?.Invoke(instance) == null) return list;
+            list.Add(new MethodDesc
+            {
+                Name = CaptureAction,
+                ReturnType = typeof(PuppetArtifact).FullName,
+                Summary = "截取本窗口/元素当前绘制结果为 PNG（应用侧自身映像：不捕获桌面、不遮挡界面、不与用户操作冲突；"
+                        + "多屏下也不会产生整屏尺寸大图）。返回 base64 图像，解码即得 PNG。",
+                SummarySource = InfoSource.PuppetDescription,
+                Parameters = CaptureParams.Select(p => new ParamDesc
+                {
+                    Name = p.Name,
+                    Type = typeof(int).FullName,
+                    Summary = p.Summary,
+                    SummarySource = InfoSource.PuppetDescription,
+                    IsOptional = true
+                }).ToList()
+            });
+            return list;
+        }
+
+        /// <summary>A 面 invoke 判定：该实例的该方法名是否为框架合成方法（命中才走 <see cref="InvokeSynthetic"/>）。</summary>
+        public static bool IsSynthetic(object instance, string methodName)
+            => methodName == CaptureAction && instance != null && CaptureResolver?.Invoke(instance) != null;
+
+        /// <summary>
+        /// A 面 invoke 执行框架合成方法（参数位置与 <see cref="DescribeSynthetic"/> 一致）。
+        /// 返回产物；失败抛异常，由调用方按 A 面既有错误形状（ok/err/stack）返回。调用方须先用 <see cref="IsSynthetic"/> 判定。
+        /// </summary>
+        public static PuppetArtifact InvokeSynthetic(object instance, string methodName, object[] args)
+        {
+            if (methodName != CaptureAction) return null;
+            var capture = CaptureResolver?.Invoke(instance);
+            if (capture == null) throw new InvalidOperationException("该实例不支持截屏");
+
+            int At(int i)
+            {
+                if (i >= (args?.Length ?? 0) || args[i] == null) return 0;
+                if (args[i] is JToken jt) return jt.Type == JTokenType.Null ? 0 : jt.ToObject<int>();
+                return Convert.ToInt32(args[i]);
+            }
+
+            var artifact = capture.Capture(At(0), At(1), At(2), At(3));
+            if (artifact == null) throw new InvalidOperationException("截屏适配器未返回图像");
+            return artifact;
         }
 
         private static string Geometry(IPuppetUiElement e)

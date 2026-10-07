@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Http.Features;
 using Puppet.Core;
 using Puppet.Core.AppAgent;
 using Puppet.Core.Usage;
@@ -24,6 +25,7 @@ internal static class Program
         var selfTest = args.Length == 1;
         var agentEnabled = key is not null;
         var inventory = new Inventory();
+        PuppetUiActions.CaptureResolver = instance => ReferenceEquals(instance, inventory) ? new PageCapture(inventory) : null;
         WebApplication? app = null;
         PuppetWebServer? agent = null;
         var exitCode = 0;
@@ -47,8 +49,13 @@ internal static class Program
             {
                 context.Response.Headers.CacheControl = "no-store";
                 context.Response.Headers.XContentTypeOptions = "nosniff";
-                context.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+                context.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
                 context.Response.Headers["Referrer-Policy"] = "no-referrer";
+                if (context.Request.Path == "/api/screenshot")
+                {
+                    var bodyLimit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+                    if (bodyLimit is { IsReadOnly: false }) bodyLimit.MaxRequestBodySize = 2 * 1024 * 1024;
+                }
                 if (agentEnabled && context.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
                 {
                     var authorization = context.Request.Headers.Authorization.ToString();
@@ -92,6 +99,12 @@ internal static class Program
             app.MapDelete("/api/reservations/{id}", (Guid id, Inventory service) =>
             {
                 service.Release(id);
+                return Results.NoContent();
+            });
+            app.MapGet("/api/screenshot/pending", (Inventory service) => service.ScreenshotPending() is { } pending ? Results.Json(pending) : Results.NoContent());
+            app.MapPost("/api/screenshot", (ScreenshotSubmission input, Inventory service) =>
+            {
+                service.SubmitScreenshot(input.Id, input.Png);
                 return Results.NoContent();
             });
             if (agentEnabled)
@@ -170,3 +183,8 @@ internal static class Program
 
 internal sealed record CreateStockRequest(string Sku, string Name, int Quantity);
 internal sealed record ReserveRequest(string Sku, int Quantity);
+
+internal sealed class PageCapture(Inventory inventory) : IPuppetCapture
+{
+    public PuppetArtifact Capture(int x, int y, int width, int height) => inventory.CaptureScreen(x, y, width, height);
+}

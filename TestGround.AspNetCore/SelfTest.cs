@@ -77,6 +77,7 @@ internal static class SelfTest
         await Status(app, HttpMethod.Post, "/api/stock", "{}", 401);
         await Status(app, HttpMethod.Post, "/api/reservations", "{}", 401);
         await Status(app, HttpMethod.Delete, "/api/reservations/" + Guid.NewGuid(), null, 401);
+        await Status(app, HttpMethod.Post, "/api/screenshot", "{}", 401);
         app.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-key");
         await Status(app, HttpMethod.Post, "/api/stock", "{}", 401);
         await Status(agent, HttpMethod.Get, "/agent/registry", null, 404);
@@ -101,6 +102,7 @@ internal static class SelfTest
         Check(registry["Instances"]!.AsArray().Any(i => i!["InstanceName"]!.GetValue<string>() == "Inventory"));
         var description = await agent.GetStringAsync("/agent/describe?name=Inventory&format=json");
         Check(description.Contains("CreateStock") && description.Contains("Reserve") && description.Contains("Release") && !description.Contains(key, StringComparison.Ordinal));
+        Check(description.Contains("CaptureAction"));
         foreach (var path in new[] { "AgentAccessKey", "AgentLog", "_gate", "_stock", "_reservations" })
             Check(!(await Get(agent, "/agent/get?name=Inventory&path=" + path))["ok"]!.GetValue<bool>());
         var state = await agent.GetStringAsync("/agent/state?name=Inventory");
@@ -118,6 +120,40 @@ internal static class SelfTest
         await Status(agent, HttpMethod.Post, "/agent/invoke?name=Inventory&method=Reserve", new string('x', 4097), 413);
         Check((await Invoke(agent, "CreateStock", "[\"INK\",\"Ink\",1]"))["ok"]!.GetValue<bool>());
         Check((await Get(app, "/api/inventory"))["stock"]!.AsArray().Count == 2);
+
+        Console.WriteLine("CHECK page screenshot: advertised, refused without consent, delivered after the page opts in");
+        var refused = await Invoke(agent, "CaptureAction", "[]");
+        Check(!refused["ok"]!.GetValue<bool>());
+        Check(refused["err"]!.GetValue<string>().Contains("ask the user", StringComparison.Ordinal));
+        await Status(app, HttpMethod.Post, "/api/screenshot", "{\"id\":1,\"png\":\"data:image/png;base64," + new string('A', 6000) + "\"}", 400);
+        Check((await Get(app, "/api/screenshot/pending")) is null);
+        const string tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        var delivered = false;
+        var pageLoop = Task.Run(async () =>
+        {
+            while (!delivered)
+            {
+                var pending = await Get(app, "/api/screenshot/pending");
+                if (pending is null) { await Task.Delay(30); continue; }
+                using var submitted = await app.PostAsJsonAsync("/api/screenshot", new { id = pending["id"]!.GetValue<long>(), png = "data:image/png;base64," + tinyPng });
+                Check(submitted.StatusCode == HttpStatusCode.NoContent);
+                delivered = true;
+            }
+        });
+        try
+        {
+            await Task.Delay(120);
+            var shot = await Invoke(agent, "CaptureAction", "[]");
+            Check(shot["ok"]!.GetValue<bool>());
+            var image = Convert.FromBase64String(shot["result"]!["Content"]!.GetValue<string>());
+            Check(image.Length > 8 && image[0] == 0x89 && image[1] == 0x50 && image[2] == 0x4E && image[3] == 0x47);
+            Check(Convert.ToBase64String(image) == tinyPng);
+        }
+        finally
+        {
+            delivered = true;
+            await pageLoop;
+        }
 
         Console.WriteLine("CHECK 48 parallel HTTP reservations for 12 units: exactly 12 successes, no overselling");
         var attempts = await Task.WhenAll(Enumerable.Range(0, 48).Select(async _ =>
@@ -228,7 +264,10 @@ internal static class SelfTest
     };
 
     private static async Task<JsonNode> Get(HttpClient client, string path)
-        => JsonNode.Parse(await client.GetStringAsync(path))!;
+    {
+        var body = await client.GetStringAsync(path);
+        return string.IsNullOrWhiteSpace(body) ? null! : JsonNode.Parse(body)!;
+    }
 
     private static async Task<JsonNode> Invoke(HttpClient client, string method, string args)
     {

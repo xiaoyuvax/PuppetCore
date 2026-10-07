@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Puppet.Core/Puppet.Core.csproj" />
+    <ProjectReference Include="../Puppet.Core.Wpf/Puppet.Core.Wpf.csproj" />
   </ItemGroup>
 </Project>

@@ -37,11 +37,23 @@ try {
 }
 ```
 
+## 已验证（2026-10-07，三屏混合 DPI）
+
+环境：3840×2160 @250%、2160×1440 @150%、2560×1440 @175%，窗口 PerMonitorAware。
+
+- 根因一：`TaskBoardForm` 未设置 `AutoScaleDimensions`（SizeF.Empty），`PerformAutoScale` 的条件不成立，DPI 缩放完全未执行；已补 `AutoScaleDimensions = new SizeF(96F, 96F)`。
+- 根因二：`AutoScaleMode.Dpi` 只缩放 `Bounds`/`ClientSize`，不缩放 `TableLayoutPanel` 的绝对 `RowStyles`/`ColumnStyles`、`ListBox.ItemHeight`、`Control.MinimumSize`，`Font.SizeInPoints` 也不缩放；已增 `ApplyMetrics()` 按 `DeviceDpi / 96` 补偿，并在 `OnFontChanged`（跨屏触发）重算。
+- csproj 增加 `ApplicationHighDpiMode` = `PerMonitorV2`。
+- 实测标量：DeviceDpi 240 / 144 / 168，ClientSize.Width 2165 / 1296 / 1514，Font.Height 47 / 28 / 33。
+- 三屏截图经 `/agent/invoke?method=CaptureAction` 取回验证：标题与计数行不裁切、列表 5 行行距均匀无重叠、按钮与状态行完整。
+- `DrawTaskItem` 的字体改为 `using` 释放，消除每次绘制的 GDI 句柄泄漏。
+- 改动后重跑：Release 构建 0 错误，无密钥与含密钥自检均退出 0。
+
 ## 限制与演进清单
 
 - 任务只存内存，删除无撤销；有需求再加本地持久化与撤销，不预建仓储层。
 - 当前无异步样例刷新；有真实数据源再加取消、失败提示及就绪状态。
-- 尚未人工验收多 DPI、屏幕阅读器、高对比度和极端缩放；当前为原生控件、命名、AccessibleName、快捷键、最小尺寸及伸缩布局。
+- 多 DPI 三屏缩放已验证（见上节）；尚未人工验收屏幕阅读器、高对比度和极端缩放，当前为原生控件、命名、AccessibleName、快捷键、最小尺寸及伸缩布局。
 - 尚未验证端口占用、Windows 注销、异常强制退出、并发外部调用关闭等边界。
 - 现有服务器输出 wwwroot 不存在与 HTTP/2、HTTP/3 无 TLS 的警告；已验证仍以 HTTP/1.1 正常完成回环请求，未创建无用静态目录或更改核心代码。
 - 框架日志生成在运行工作目录的 logs；请从本目录运行。不要读取/分享包含潜在敏感业务信息的完整日志。

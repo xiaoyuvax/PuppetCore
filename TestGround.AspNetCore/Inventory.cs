@@ -18,6 +18,17 @@ public sealed class Inventory : IPuppet
     [PuppetIgnore] private readonly Dictionary<string, Stock> _stock = new(StringComparer.Ordinal);
     [PuppetIgnore] private readonly Dictionary<Guid, Reservation> _reservations = [];
 
+    [PuppetIgnore] private readonly object _shotGate = new();
+    [PuppetIgnore] private long _shotSeen;
+    [PuppetIgnore] private long _shotActive;
+    [PuppetIgnore] private long _shotSeq;
+    [PuppetIgnore] private int _shotX;
+    [PuppetIgnore] private int _shotY;
+    [PuppetIgnore] private int _shotWidth;
+    [PuppetIgnore] private int _shotHeight;
+    [PuppetIgnore] private byte[]? _shotPng;
+    [PuppetIgnore] private TaskCompletionSource? _shotReady;
+
     [PuppetIgnore] string IPuppet.AgentAccessKey => PuppetKeyVault.GlobalKey;
     [PuppetIgnore] ILog IPuppet.AgentLog => new Common.Logging.Simple.NoOpLogger();
     [PuppetIgnore] string IPuppet.AgentInstanceName => "Inventory";
@@ -80,6 +91,72 @@ public sealed class Inventory : IPuppet
         }
     }
 
+    [PuppetIgnore]
+    internal Puppet.Core.AppAgent.PuppetArtifact CaptureScreen(int x, int y, int width, int height)
+    {
+        TaskCompletionSource ready;
+        lock (_shotGate)
+        {
+            if (Environment.TickCount64 - _shotSeen > 3000)
+                throw new InvalidOperationException("Screenshot capture is off. It is not a standing capability: ask the user to enable the page screenshot switch, then retry.");
+            if (_shotReady is not null)
+                throw new InvalidOperationException("A screenshot request is already in progress.");
+            _shotActive = ++_shotSeq;
+            _shotX = x;
+            _shotY = y;
+            _shotWidth = width;
+            _shotHeight = height;
+            _shotPng = null;
+            _shotReady = ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        var delivered = ready.Task.Wait(TimeSpan.FromSeconds(5));
+        byte[]? png;
+        lock (_shotGate)
+        {
+            png = _shotPng;
+            _shotPng = null;
+            if (ReferenceEquals(_shotReady, ready)) _shotReady = null;
+            _shotActive = 0;
+        }
+        if (!delivered || png is null)
+            throw new InvalidOperationException("The page did not deliver a screenshot in time. Keep the page open and the screenshot switch on.");
+        return new Puppet.Core.AppAgent.PuppetArtifact("screenshot.png", "image/png", png);
+    }
+
+    [PuppetIgnore]
+    internal ScreenshotRequest? ScreenshotPending()
+    {
+        lock (_shotGate)
+        {
+            _shotSeen = Environment.TickCount64;
+            if (_shotReady is null || _shotActive == 0) return null;
+            return new ScreenshotRequest(_shotActive, _shotX, _shotY, _shotWidth, _shotHeight);
+        }
+    }
+
+    [PuppetIgnore]
+    internal void SubmitScreenshot(long id, string? png)
+    {
+        const string prefix = "data:image/png;base64,";
+        if (png is null || !png.StartsWith(prefix, StringComparison.Ordinal))
+            throw new ArgumentException("A data:image/png;base64 image is required.");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(png[prefix.Length..]); }
+        catch (FormatException) { throw new ArgumentException("Image data is not valid base64."); }
+        if (bytes.Length is < 8 or > 1500000) throw new ArgumentException("Image payload size is out of range.");
+        if (bytes[0] != 0x89 || bytes[1] != 0x50 || bytes[2] != 0x4E || bytes[3] != 0x47)
+            throw new ArgumentException("Image payload is not a PNG.");
+        TaskCompletionSource ready;
+        lock (_shotGate)
+        {
+            if (id != _shotActive || _shotReady is null)
+                throw new ArgumentException("Screenshot request is unknown or already completed.");
+            _shotPng = bytes;
+            ready = _shotReady;
+        }
+        ready.TrySetResult();
+    }
+
     private static void ValidateSku(string sku)
     {
         if (sku is null || sku.Length is < 1 or > 24 || sku.Any(c => !(c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '-')))
@@ -91,3 +168,6 @@ public sealed class Inventory : IPuppet
         if (quantity is < 1 or > 1000000) throw new ArgumentException("Quantity must be 1..1000000.");
     }
 }
+
+internal sealed record ScreenshotRequest(long Id, int X, int Y, int Width, int Height);
+internal sealed record ScreenshotSubmission(long Id, string? Png);

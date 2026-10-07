@@ -4,6 +4,7 @@
     <Project Path="tests/Puppet.Core.Tests/Puppet.Core.Tests.csproj" />
   </Folder>
   <Project Path="Puppet.Core.WinForms/Puppet.Core.WinForms.csproj" />
+  <Project Path="Puppet.Core.Wpf/Puppet.Core.Wpf.csproj" />
   <Project Path="TestGround.Winform/TestGround.Winform.csproj" />
   <Project Path="TestGround.Console/TestGround.Console.csproj" />
   <Project Path="TestGround.Wpf/TestGround.Wpf.csproj" />

@@ -38,6 +38,10 @@ public sealed class TaskBoardForm : Form, IPuppet
     private readonly Label _agentStatus = MakeLabel("AgentStatus", Loc.T("Puppet 尚未启动", "Puppet not started"), 9);
     [PuppetIgnore] private readonly ILog _log = LogManager.GetLogger(typeof(TaskBoardForm));
     [PuppetIgnore] private PuppetWebServer? _server;
+    [PuppetIgnore] private TableLayoutPanel _layout = null!;
+    [PuppetIgnore] private TableLayoutPanel _entry = null!;
+    [PuppetIgnore] private TableLayoutPanel _toolbar = null!;
+    [PuppetIgnore] private bool _metricsReady;
     [PuppetIgnore] private bool _rendering;
     [PuppetIgnore] private bool _closing;
     [PuppetIgnore] private bool _shutdownComplete;
@@ -70,16 +74,17 @@ public sealed class TaskBoardForm : Form, IPuppet
         ClientSize = new Size(860, 620);
         MinimumSize = new Size(720, 540);
         StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        var layout = new TableLayoutPanel { Name = "BoardLayout", AccessibleName = Loc.T("任务看板布局", "Task board layout"), Dock = DockStyle.Fill, Padding = new Padding(28), ColumnCount = 1, RowCount = 8 };
+        var layout = _layout = new TableLayoutPanel { Name = "BoardLayout", AccessibleName = Loc.T("任务看板布局", "Task board layout"), Dock = DockStyle.Fill, Padding = new Padding(28), ColumnCount = 1, RowCount = 8 };
         foreach (var height in new[] { 56f, 36f, 50f, 44f, 0f, 54f, 40f, 28f })
             layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.Controls.Add(MakeLabel("Heading", Loc.T("小步  /  TASK BOARD", "PACE  /  TASK BOARD"), 23, FontStyle.Bold), 0, 0);
         layout.Controls.Add(MakeLabel("Subtitle", Loc.T("专注眼前，把计划变成已完成。", "Focus on what's here and turn plans into done."), 10), 0, 1);
 
-        var entry = new TableLayoutPanel { Name = "EntryLayout", AccessibleName = Loc.T("添加任务", "Add task"), Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
+        var entry = _entry = new TableLayoutPanel { Name = "EntryLayout", AccessibleName = Loc.T("添加任务", "Add task"), Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
         entry.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         entry.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
         entry.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
@@ -90,7 +95,7 @@ public sealed class TaskBoardForm : Form, IPuppet
         entry.Controls.Add(_addButton, 2, 0);
         layout.Controls.Add(entry, 0, 2);
 
-        var toolbar = new TableLayoutPanel { Name = "FilterLayout", AccessibleName = Loc.T("筛选与数量", "Filter and counts"), Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        var toolbar = _toolbar = new TableLayoutPanel { Name = "FilterLayout", AccessibleName = Loc.T("筛选与数量", "Filter and counts"), Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
         toolbar.Controls.Add(_counts, 0, 0);
@@ -132,7 +137,34 @@ public sealed class TaskBoardForm : Form, IPuppet
             }
         };
         _taskList.DrawItem += DrawTaskItem;
+        _metricsReady = true;
+        ApplyMetrics();
         RenderTasks();
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        if (_metricsReady) ApplyMetrics();
+    }
+
+    private void ApplyMetrics()
+    {
+        var s = DeviceDpi / 96f;
+        int S(float v) => (int)Math.Round(v * s);
+        var heights = new[] { 56f, 36f, 50f, 44f, 0f, 54f, 40f, 28f };
+        _layout.Padding = new Padding(S(28));
+        for (var i = 0; i < heights.Length; i++)
+            _layout.RowStyles[i] = heights[i] == 0
+                ? new RowStyle(SizeType.Percent, 100)
+                : new RowStyle(SizeType.Absolute, S(heights[i]));
+        _entry.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, S(110));
+        _entry.ColumnStyles[2] = new ColumnStyle(SizeType.Absolute, S(120));
+        _toolbar.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, S(160));
+        _taskList.ItemHeight = S(34);
+        foreach (var button in new[] { _addButton, _completeButton, _removeButton, _renameButton, _priorityButton, _clearDoneButton })
+            button.MinimumSize = new Size(S(112), S(36));
+        PerformLayout();
     }
 
     /// <summary>v1.0 演示：异步范式动作——Task&lt;bool&gt; 命中语义锚点自动收录（提案 §3.2 async 锚点）；兼作实例串行 409 演示载体</summary>
@@ -283,7 +315,7 @@ public sealed class TaskBoardForm : Form, IPuppet
             : task.Priority == Priority.High ? Color.FromArgb(178, 58, 48)
             : ForeColor;
         using var foreBrush = new SolidBrush(foreColor);
-        var font = new Font("Microsoft YaHei UI", task.Priority == Priority.High && !task.Completed ? 11.5f : 11f, task.Priority == Priority.High && !task.Completed ? FontStyle.Bold : FontStyle.Regular);
+        using var font = new Font("Microsoft YaHei UI", task.Priority == Priority.High && !task.Completed ? 11.5f : 11f, task.Priority == Priority.High && !task.Completed ? FontStyle.Bold : FontStyle.Regular);
         e.Graphics.DrawString(task.ToString(), font, foreBrush, e.Bounds);
         e.DrawFocusRectangle();
     }

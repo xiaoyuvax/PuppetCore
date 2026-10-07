@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using Puppet.Core.AppAgent;
 using Wima.Core;
 
 namespace Puppet.Core.Describe
@@ -29,6 +30,11 @@ namespace Puppet.Core.Describe
                 Fields = EnumerateFields(type),
                 Hints = EnumerateHints(type)
             };
+
+            // 框架合成方法（非实例成员）：由 PuppetUiActions 按注入能力追加，无能力的实例不出现
+            var synthetic = PuppetUiActions.DescribeSynthetic(target);
+            if (synthetic.Count > 0) doc.Methods.AddRange(synthetic);
+
             return format == DescribeFormat.Json
                 ? Utils.ToJson(doc, compact: true)
                 : ToMarkdown(doc);

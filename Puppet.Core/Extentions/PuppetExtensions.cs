@@ -138,17 +138,25 @@ namespace Puppet.Core.Extentions
         /// <param name="args">参数数组（已反序列化的对象）</param>
         public static string Invoke(this IPuppet target, string methodName, object[] args)
         {
+            // 框架合成方法（如 CaptureAction）：非实例成员，先于反射解析分派，产物直接进 result
+            bool synthetic = AppAgent.PuppetUiActions.IsSynthetic(target, methodName);
             var type = target.GetType();
-            var method = ResolveMethod(type, methodName, args);
+            var method = synthetic ? null : ResolveMethod(type, methodName, args);
 
-            if (method == null) return ToAgentJson(new { ok = false, err = "method not found" });
-            if (method.GetCustomAttribute<PuppetIgnoreAttribute>() != null)
+            if (!synthetic && method == null) return ToAgentJson(new { ok = false, err = "method not found" });
+            if (method?.GetCustomAttribute<PuppetIgnoreAttribute>() != null)
                 return ToAgentJson(new { ok = false, err = "method not accessible" });
 
             PuppetUsage.Track($"invoke::{methodName}", $"{target.AgentInstanceName}.{methodName}(args={args?.Length})");
 
             try
             {
+                if (synthetic)
+                {
+                    var artifact = RunOnUi(target, () => AppAgent.PuppetUiActions.InvokeSynthetic(target, methodName, args));
+                    return ToAgentJson(new { ok = true, result = artifact, returnType = typeof(AppAgent.PuppetArtifact).FullName });
+                }
+
                 var parameters = BindParameters(method, args);
                 object retVal;
 

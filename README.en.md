@@ -11,7 +11,7 @@
 It is not a library for human developers — it is a tool for agents. Its purpose is to support two things **at runtime**:
 
 1. **Agent self-debugging** (facet A) — agents use it to simulate real user interactions and observe runtime state, driving automated debugging and testing of host applications.
-2. **Users operating an application through an agent via natural language** (facet B) — turning an app into an "agent-operable" application form: the user gives natural-language instructions to their personal agent, and the agent drives the app through semantic actions to complete the workflow, **with no UI Automation** (no screenshots, no synthesized input, no dependence on focus or control handles).
+2. **Users operating an application through an agent via natural language** (facet B) — turning an app into an "agent-operable" application form: the user gives natural-language instructions to their personal agent, and the agent drives the app through semantic actions to complete the workflow, **with no UI Automation** (not driven by screenshots or synthesized input, no dependence on focus or control handles).
 
 One kernel, two facades: `/agent/*` (A, self-debugging) and `/appagent/*` (B, user proxy) — see "Two Facets: A Self-Debugging / B User Proxy" below.
 
@@ -32,6 +32,7 @@ Puppet.Core enables agents to **automatically debug applications** — specifica
 | ------- | ----------- |
 | Puppet.Core | Generic core: interfaces, serialization, capability description, registry, web endpoints, built-in web server, usage logging, console process diagnostics |
 | Puppet.Core.WinForms | WinForms support: control-tree traversal, Click / Text / Select operations |
+| Puppet.Core.Wpf | WPF support: internal screen capture adapter (`RenderTargetBitmap`), wired up by the host via `UseWpfCapture()` |
 | TestGround.Winform | WinForms workbench (task board): standing lab for framework self-debugging and evolution |
 | TestGround.Console | Console workbench (expense ledger): integration and verification lab for command-line hosts |
 | TestGround.Wpf | WPF workbench (reading list): data-binding and Dispatcher scenario lab |
@@ -103,9 +104,10 @@ Puppet.Core is **one kernel with two facades**:
 
 Historically, letting an agent drive a GUI app meant **UI Automation** (screenshots, pixel matching, control trees, synthesized mouse/keyboard). That path is **unreliable, inefficient, and easily disturbed**: it breaks whenever the UI changes, depends on focus and window state, is extremely fragile under multiple monitors or concurrency, and can express "where to click" but never "what to do".
 
-Puppet.Core takes a different route — it promotes **actions to first-class citizens** (the Actionize paradigm), so an agent drives the app through **semantic action names plus structured arguments**, never touching the UI:
+Puppet.Core takes a different route — it promotes **actions to first-class citizens** (the Actionize paradigm), so an agent drives the app through **semantic action names plus structured arguments**, never going through the UI side:
 
-* **No UI Automation**: no screenshots, no synthesized input, no dependence on control handles or focus — inherently stable, concurrency-safe, auditable, and regression-friendly (action names are stable, so UI redesigns do not break agent scripts)
+* **It never goes through the UI side (the root reason)**: not driven by screenshots or synthesized input, no dependence on control handles or focus. The reason is that Puppet does not share an operating path with the user — the agent's commands never enter the UI pipeline, so it neither competes for focus nor gets disturbed by what the user does. The result is inherent stability, concurrency safety, auditability, and regressibility (action names are stable, so UI redesigns do not break agent instructions)
+* **Screen images come from inside the application**: when it needs to "take a look", it uses facet A via `GET /agent/describe` + `POST /agent/invoke?method=CaptureAction` (WinForms and WPF supported), reading pixels the application rendered itself — an image of the UI held on the Puppet side. It intercepts nothing, covers nothing, and never produces a full-screen-sized image on multi-monitor setups, in keeping with the principle of not sharing a path with the user and not interfering
 * **Actions are the interface**: business logic inside event handlers, once lifted into `public` methods returning a success/failure type (`bool` / `OperationResult` / `Task<…>`), is **automatically** published in the capability catalog `GET /appagent/manifest`; agents invoke it via `POST /appagent/actions/{name}`
 * **Modal dialogs are proxyable**: entry points use `PuppetDialog.Ask` instead of `MessageBox.Show`, so an agent answers through the `dialogs` preset table and **never blocks**
 * **Zero-configuration discovery**: enumerate `%LOCALAPPDATA%\Puppet.AppAgents\*.json` to get `{app, endpoint, key}` (isolated by user-profile ACLs); the user just says "look at local port 9090"

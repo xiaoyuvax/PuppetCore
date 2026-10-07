@@ -432,8 +432,10 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 - `Screens`（string）：各屏 `[索引] 设备名 bounds=x,y,w×h work=x,y,w×h primary?`；Agent 按需读 `/appagent/state/Screens`，据此把窗口摆到指定屏幕。
 
 接入（平台包设置解析器：实例 → 能力，返回 null 表示该实例无 UI 能力）：
-- `PuppetUiActions.UiElementResolver` / `WindowResolver` / `Confirm`（关闭确认，未注入按安全默认拒绝）/ `ScreensProvider`（屏幕枚举）。
-- WinForms 包：`UseFormControls()` 自动调用 `WinFormsPuppetUiActions.UsePuppetUiActions()`，把 `Form` / `Control` 适配为上述能力并注入 `Screen.AllScreens`。WPF / Web 包照此提供适配器（`Window` / `FrameworkElement`；DOM rect / CSS display / fullscreen）。
+- `PuppetUiActions.UiElementResolver` / `WindowResolver` / `Confirm`（关闭确认，未注入按安全默认拒绝）/ `ScreensProvider`（屏幕枚举）/ `CaptureResolver`（内部截屏：实例 → `IPuppetCapture`，返回 null = 该实例无此能力）。
+- WinForms 包：`UseFormControls()` 自动调用 `WinFormsPuppetUiActions.UsePuppetUiActions()`，把 `Form` / `Control` 适配为上述能力并注入 `Screen.AllScreens`。WPF 包 `Puppet.Core.Wpf`：宿主 `new PuppetWebServer().UseWpfCapture()` 注入 `RenderTargetBitmap` 适配（`Window` / `FrameworkElement`）。Web 包照此提供适配器（DOM rect / CSS display / fullscreen）。
+
+**内部截屏 `CaptureAction`（A 面合成方法，1.3.0）**：截屏**刻意不进 B 面 manifest**，只作为 A 面合成方法暴露，避免与用户共享操作流程。框架没有通用的"A 面合成 action"机制——`/agent/describe`（`CapabilityDescriber.Describe`）与 `/agent/invoke`（`PuppetExtensions.Invoke`）各自独立反射，故必须两处同步注入：`PuppetUiActions.DescribeSynthetic()` 补进方法目录、`IsSynthetic()` 先于反射分派、`InvokeSynthetic()` 执行并把 `PuppetArtifact`（PNG 字节）以 base64 内联进 `result`（A 面无 asset store 通道，故意如此）。describe 与 invoke 共用同一份 `CaptureParams` 位置表：`[x, y, width, height]`，四个参数全可选，`width/height <= 0` 或省略 = 整个元素；执行包在 `Invoke` 既有的 `RunOnUi` 编组内（UI 线程）。`CaptureResolver` 未注入时 describe 不出现该方法、invoke 返回 `method not found`。
 
 规则：
 - `ActionizePolicy.Scan(type, instance)` 在 `instance` 具备 UI 能力时追加这些基础 action 与屏幕 state；**宿主已声明的同名成员优先**（不重复）。
@@ -442,7 +444,7 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 - 关闭属破坏性操作：`confirm=null` 走 `PuppetUiActions.Confirm`（Agent 上下文由 DialogBroker 按安全默认 No 自动应答，永不因模态框挂死）。
 - **模态自动应答双通道对称（1.2.8）**：A 通道（`/agent/*`）与 B 通道（`/appagent/*`）现在都在入口统一 `DialogBroker.Push`——A 推 `null`（无预答，纯安全默认），B 推动作调用预置的 `dialogPresets`。宿主侧 `PuppetDialog.Ask` 垫片无感知，两通道行为一致：Agent 上下文中模态永不阻塞。
 
-已实测（`TestGround.Winform`）：`MoveAction` / `SetBoundsAction` / `SetWindowStateAction` / `SetVisibleAction` / `SetEnabledAction` / `SetTopMostAction` / `SetTitleAction` / `SetOpacityAction` / `ActivateAction` / `CloseWindowAction(confirm:false)` 均生效；多屏下 `ScreenCount` / `Screens` 返回各屏几何。
+已实测（`TestGround.Winform`）：`MoveAction` / `SetBoundsAction` / `SetWindowStateAction` / `SetVisibleAction` / `SetEnabledAction` / `SetTopMostAction` / `SetTitleAction` / `SetOpacityAction` / `ActivateAction` / `CloseWindowAction(confirm:false)` 均生效；多屏下 `ScreenCount` / `Screens` 返回各屏几何。已实测（`TestGround.Wpf` + `Puppet.Core.Wpf`）：`CaptureAction` 全窗与区域截屏均生效，describe / invoke 两端点一致，产物为合法 PNG。
 
 ### Actionize 覆盖度扫描（找出"未覆盖的用户操作"）
 

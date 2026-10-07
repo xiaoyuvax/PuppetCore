@@ -8,8 +8,10 @@
 
 ```powershell
 dotnet build TestGround.Winform.csproj -c Release
-dotnet run --project TestGround.Winform.csproj -c Release --no-build
+.\bin\Release\net10.0-windows\TestGround.Winform.exe
 ```
+
+日常启动用 `.exe`（WinExe，无控制台窗口）；`dotnet run` / `dotnet <dll>` 会由 dotnet 宿主弹出命令行窗口。
 
 添加 1–120 个 UTF-16 字符的单行标题，自动去首尾空白、拒绝同名（忽略大小写）；可为新任务选择优先级（普通/高），高优先级待办在列表中加粗红字显示。选择后可完成、删除、重命名（输入框内容作为新标题）、切换优先级（仅待办），或一键清除全部已完成任务，支持全部/待办/已完成筛选。添加会切回全部并选中新任务；计数栏显示待办中的高优数量。Enter 添加，Alt+A/C/D/R/P/E 操作按钮，Tab 导航。任务仅存内存，关闭即丢失，删除与清除无撤销。
 

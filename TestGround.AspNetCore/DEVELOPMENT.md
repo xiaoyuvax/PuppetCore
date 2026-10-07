@@ -24,9 +24,13 @@ Snapshot 在同一锁内复制库存和预留为 ImmutableArray；元素为不�
 
 模式 C：既有 PuppetWebServer 19104 与应用 Kestrel 19204 均固定 IPv4 回环，共享同一 Inventory 实例。应用不挂载 /agent，浏览器仅访问同源普通 API，不需要跨域或适配器。
 
-普通 API 所有非 GET/HEAD 请求在绑定 body 前验证 Bearer 密钥，使用当前 PuppetKeyVault.GlobalKey；匿名可读库存。未启用 CORS、cookie 或持久会话，前端通过 Authorization 头写入。页面设置 no-store、nosniff、no-referrer、frame-ancestors none；所有业务字符串使用 textContent/Option 渲染，不拼接业务 HTML。单文件页面为内联脚本/样式允许 CSP unsafe-inline，不能宣称严格 nonce CSP。
+普通 API 所有非 GET/HEAD 请求在绑定 body 前验证 Bearer 密钥，使用当前 PuppetKeyVault.GlobalKey；匿名可读库存。未启用 CORS、cookie 或持久会话，前端通过 Authorization 头写入。页面设置 no-store、nosniff、no-referrer、frame-ancestors none；CSP 为 `default-src 'self'` 加内联脚本/样式 unsafe-inline 与 `img-src 'self' data:`（截图导出走 data: URL 的 SVG），不能宣称严格 nonce CSP。所有业务字符串使用 textContent/Option 渲染，不拼接业务 HTML。
 
 业务输入错误不回显原始输入；默认空错误响应补充 Problem Details。Kestrel body 上限 4096 字节；Puppet 在既有 UseHandler 检查 Content-Length，拒绝 chunked 和无长度 POST。后者可能发生在底层缓冲之后，不等同于服务器层流量防护。Puppet 保留核心 404 鉴权隐藏和 ok/result 协议。
+
+页面截图走应用 Kestrel，不经 Agent 服务器：`GET /api/screenshot/pending` 匿名可读，读取同时刷新“页面在场”信号；`POST /api/screenshot` 走既有 Bearer 校验，body 上限在该路由放宽到 2 MB，其余写路由仍为 4096 字节。回传必须是 `data:image/png;base64` 图片、PNG 魔数正确、8 字节到 1.5 MB，且 id 匹配当前挂起请求，否则按输入错误返回 400。Puppet 只在 3 秒内见过 pending 请求时才发起 `CaptureAction`，否则立即失败并提示先征得用户同意；已授权则等待页面回传 5 秒。截图挂起状态使用独立于业务 `_gate` 的锁与等待句柄，不阻塞库存读写，也没有暴露给 Puppet 的成员。轮询由页面勾选开关驱动，Puppet 没有任何开启或注入入口，因此它不是常设能力，必须由用户在页面上开启。
+
+页面导出路径：DOM 克隆逐元素内联计算样式（Blink 的 `computed.cssText` 为空必须逐属性拷贝），checkbox/单选/输入框的当前状态以 attribute 形式写入克隆（`type=password` 例外，运行时密钥不进入截图），序列化为 SVG foreignObject 后经 `data:` URL 的 `<img>` 解码再画到 canvas。`createImageBitmap(SVG Blob)` 在 Chromium 上无法解码含 foreignObject 的 SVG（报 "The source image could not be decoded"），必须走 `<img>` 路径，因此 CSP 需要 `img-src 'self' data:`。导出失败经页面状态行向用户显示（与 perform 的错误显示一致）。
 
 PuppetUsage.Enabled=false，IPuppet.AgentLog 为 NoOpLogger，服务器 LogMan 关闭输出，应用 ClearProviders；底层构造和 Kestrel 仍产生生命周期输出。宿主不记录密钥/请求体/请求头/完整异常，诊断仅异常类型与自检源码行号。环境清除及托管字符串释放不等于物理擦除内存，浏览器密码管理器是用户自行控制的外部功能。普通只读 API 对其他本机进程可见；此项目不是多用户权限隔离或公网安全方案。
 
@@ -61,6 +65,14 @@ try {
 - git status 中原有根 targets、核心源码及其他 TestGround 的修改保持原样，本任务只新增本目录文件，无提交。
 
 底层提示回环非 TLS 端点禁用 HTTP/2、HTTP/3，HTTP/1.1 实测正常。未手动操作真实浏览器（只验证 HTML HTTP 内容，不等于 JS 交互/视觉/键盘测试）；未验证实际 Ctrl+C、启动端口冲突、跨平台、持续压力、恶意流量、Puppet chunked 防护、发布/Trim/AOT。无持久化，未实施失败重试幂等协议。
+
+## 已验证证据（2026-10-07，页面截图按需授权）
+
+- Release 构建 0 warnings、0 errors；`--self-test` 退出 0，无密钥退出 1，未知参数退出 2。
+- 自检覆盖：describe 含 `CaptureAction`；未授权调用立即返回 `ok=false` 且错误提示要求先征得用户同意；6000 字节的 PNG 提交返回 400 而非 413，证明该路由 body 上限已放宽而其余写路由仍为 4096；无挂起请求时 `pending` 返回 204 空体；模拟页面轮询并回传 PNG 后 `CaptureAction` 成功，返回的 base64 解码字节与提交内容逐字节相同且 PNG 魔数正确。
+- 无密钥启动：`/` 返回 200 且含勾选开关，`GET /api/screenshot/pending` 返回 204 空体，未认证 `POST /api/screenshot` 返回 400 Problem Details（与既有写路由一致，未提供运行时密钥时不启用鉴权块）。
+- 真实浏览器全链路（Edge，仅走用户路径：UIA 驱动密码框输入、点击 Use key、勾选开关，无调试钩子，密钥不落盘）：`CaptureAction` 经 Agent 端点返回合法 PNG（1149×1469，魔数正确，约 142 KB），重复两次成功；经程序校验尺寸与颜色多样性（153 种颜色、38% 非白像素），排除空白画布。期间实测发现并修复：`createImageBitmap(SVG Blob)` 不能解码 foreignObject SVG，改为 `data:` URL `<img>`；克隆不含表单状态，改为写回 attribute（密码框除外）；页面状态行显示导出错误。视觉保真度（字体、圆角、阴影、勾选框呈勾选态）已经用户核对截图确认正常（2026-10-07）。
+- 运维陷阱：浏览器标签页开关开启时会持续轮询固定端口 19204，使自检的“未授权 CaptureAction 立即拒绝”检查因在场信号新鲜而挂满 5 秒等待，最终在 Invoke 处抛 TaskCanceledException——跑自检前先把各标签页开关关掉或关闭页面。后台标签页的 UIA 元素与前台无法区分（RuntimeId 为空、IsOffscreen 均为 false），需逐个标签页尝试。
 
 ## 后续任务（按实际需求推进）
 

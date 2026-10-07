@@ -46,12 +46,20 @@ finally { $env:PUPPET_TESTGROUND_KEY = $null }
 | POST /api/stock | {"sku":"PAPER","name":"纸张","quantity":12} | 201，库存 |
 | POST /api/reservations | {"sku":"PAPER","quantity":2} | 201，预留，含 id |
 | DELETE /api/reservations/{id} | 无 | 204，释放整笔预留 |
+| GET /api/screenshot/pending | 无 | 204 无待处理请求；200 返回待处理 id 与区域，并刷新页面在场信号 |
+| POST /api/screenshot | {"id":1,"png":"data:image/png;base64,..."} | 204，回传一张 PNG |
 
 SKU 为 1..24 个大写 ASCII 字母、数字或连字符；名称为 1..80 字符，拒绝空白名称、控制及格式字符；数量为 1..1000000 整数。最多 1000 个 SKU、10000 笔活动预留。无追加库存、出库、部分释放或删除 SKU 功能。
 
-普通 API 错误使用 Problem Details：400 输入无效，401 密钥无效，404 目标不存在或预留已释放，409 重复 SKU、库存不足或容量已满，413 请求体超过 4096 字节，415 不支持的媒体类型。错误不改变库存。并发释放同一预留只成功一次，其余 404；重试创建/预留没有幂等键，网络结果不确定时先刷新状态。
+普通 API 错误使用 Problem Details：400 输入无效，401 密钥无效，404 目标不存在或预留已释放，409 重复 SKU、库存不足或容量已满，413 请求体超过 4096 字节（`/api/screenshot` 例外，上限 2 MB），415 不支持的媒体类型。错误不改变库存。并发释放同一预留只成功一次，其余 404；重试创建/预留没有幂等键，网络结果不确定时先刷新状态。
 
 Puppet 暴露真实业务方法 `Snapshot()`、`CreateStock(sku,name,quantity)`、`Reserve(sku,quantity)`、`Release(id)`。例如 POST `/agent/invoke?name=Inventory&method=Reserve`，JSON 参数数组 `["PAPER",2]`。沿用核心响应约定（业务失败为 ok=false，鉴权失败为 404），不强行改成普通 API 状态码。核心 `/agent/key/refresh` 会让两套写接口上的旧密钥失效；调用方只在内存接收新密钥，页面需重新输入。
+
+## 页面截图（按需授权）
+
+页面截图不是常设能力，Puppet 不能自行开启。相关代码随页面下发，但默认不轮询；只有用户勾选访问卡片里的 "Allow Puppet to capture this page image"（允许 Puppet 获取本页渲染截图）后，页面才每秒请求一次 `GET /api/screenshot/pending`，读到待处理请求时用页面自身渲染（DOM 克隆 → SVG foreignObject → canvas）导出 PNG，再 `POST /api/screenshot` 回传。取消勾选、离开页面或刷新即停止。
+
+Puppet 侧经 A 面合成方法 `CaptureAction(x,y,width,height)` 调用，与其他 TestGround 宿主同一 describe/invoke 协议。未授权或页面未打开时立即失败并提示先征得用户同意；已授权则等待页面回传，5 秒未到报超时。回传必须是 `data:image/png;base64` 图片，PNG 魔数正确、8 字节到 1.5 MB，id 必须匹配当前挂起请求；提交同样要求运行时密钥（页面 Use key 之后）。
 
 ## 自检与限制
 

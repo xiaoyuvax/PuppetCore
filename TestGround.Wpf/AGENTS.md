@@ -1,7 +1,7 @@
 # Agent 边界
 
 - 本目录是独立 WPF 阅读清单宿主；以本应用真实用户需求为先，可复现证据指向共享核心问题时做最小框架修改并重跑受影响的 TestGround，不做投机性新增；仅在用户要求时提交。
-- 保持 net10.0-windows、WinExe、UseWPF、IsPackable=false，仅引用 Puppet.Core；不创建 WPF 核心程序集、不加依赖。
+- 保持 net10.0-windows、WinExe、UseWPF、IsPackable=false；引用 `Puppet.Core` 与 `Puppet.Core.Wpf`（内部截屏适配，宿主在 `UseAppAgent` 之前调用 `UseWpfCapture()`），不加第三方依赖、不在本目录创建核心程序集。
 - 用户界面和 Agent 共用 ReadingList 的实际操作及验证；ObservableCollection + ICollectionView + INotifyPropertyChanged，无测试专用暴露入口。
 - 必须在主窗口 Loaded、主 Dispatcher 的 SynchronizationContext 有效后注册 IPuppet。UI 集合与所有变更保留线程亲和检查。
 - 基础设施、绑定对象、事件及编译器后备字段标记 PuppetIgnore；仅用标量观察，不对 Window 做整体状态序列化。

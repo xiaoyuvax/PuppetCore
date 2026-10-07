@@ -11,7 +11,7 @@
 它不是给开发者用的库，而是 Agent 的工具。其目的是在**运行时**支持两件事：
 
 1. **Agent 自动调试**（面向 A）——Agent 借助它模拟真实用户操作、观测运行时状态，对宿主程序实施自动化调试与测试。
-2. **用户通过自然语言操作 Agent 来操控应用**（面向 B）——把应用变成一种"Agent 可代理操控"的新型应用形态：用户对个人 Agent 下达自然语言指令，Agent 以语义化动作驱动应用完成操作流程，**无需 UI Automation**（不截屏、不合成输入、不依赖焦点与控件句柄）。
+2. **用户通过自然语言操作 Agent 来操控应用**（面向 B）——把应用变成一种"Agent 可代理操控"的新型应用形态：用户对个人 Agent 下达自然语言指令，Agent 以语义化动作驱动应用完成操作流程，**无需 UI Automation**（不靠截屏 / 合成输入驱动，不依赖焦点与控件句柄）。
 
 一套内核、两个门面：`/agent/*`（A 自调试）与 `/appagent/*`（B 用户代理），详见下文《两种面向：A 自调试 / B 用户代理》。
 
@@ -32,6 +32,7 @@ Puppet.Core 让 Agent **自动调试应用程序**——面向需要编译后进
 | ---- | ---- |
 | Puppet.Core | 通用核心：接口、序列化、能力描述、注册表、Web 端点、内建 Web 服务器、使用日志、Console 进程诊断 |
 | Puppet.Core.WinForms | WinForms 专用：控件树遍历、Click / Text / Select 控件操作 |
+| Puppet.Core.Wpf | WPF 专用：内部截屏适配（`RenderTargetBitmap`），宿主 `UseWpfCapture()` 接入 |
 | TestGround.Winform | WinForms 工作台（任务看板）：框架自我调试与演进的常驻试验场 |
 | TestGround.Console | 控制台工作台（支出账本）：命令行宿主的集成与验证试验场 |
 | TestGround.Wpf | WPF 工作台（阅读清单）：数据绑定与 Dispatcher 场景试验场 |
@@ -103,9 +104,10 @@ Puppet.Core 是**一套内核、两个门面**：
 
 让 Agent 操控 GUI 应用，传统上只能走 **UI Automation**（截屏/像素匹配/控件树/合成鼠标键盘）。这条路**不可靠、低效率、易受干扰**：界面一改就失效，依赖焦点与窗口状态，多显示器/并发下极其脆弱，且只能表达"点哪里"而不能表达"要做什么"。
 
-Puppet.Core 走的是另一条路——**把"动作"提升为一等公民**（Actionize 范式），Agent 用**语义化动作名 + 结构化参数**驱动应用，全程不碰 UI：
+Puppet.Core 走的是另一条路——**把"动作"提升为一等公民**（Actionize 范式），Agent 用**语义化动作名 + 结构化参数**驱动应用，全程不走 UI 侧接口：
 
-* **不依赖 UI Automation**：不截屏、不合成输入、不依赖控件句柄与焦点——天然稳定、可并发、可审计、可回归（动作名稳定，UI 改版不影响 Agent 指令）
+* **不走 UI 侧接口（根本原因）**：不靠截屏 / 合成输入驱动、不依赖控件句柄与焦点。这样做是因为 Puppet 不与用户共享同一条操作流程——Agent 的指令从不进入 UI 通路，因而既不与用户抢焦点，也不会被用户操作打断；由此带来天然稳定、可并发、可审计、可回归（动作名稳定，UI 改版不影响 Agent 指令）
+* **界面截图取自应用内部**：需要"看一眼界面"时走 A 面 `GET /agent/describe` + `POST /agent/invoke?method=CaptureAction`（WinForms / WPF 均支持），读取的是应用自己绘制出来的像素——这是 Puppet 侧对 UI 的一份映像，不拦截输入、不遮挡界面、多屏下也不产生整屏大图，与"互不共享流程、互不干扰"的原则一致
 * **动作即接口**：事件处理器里的业务逻辑提炼为 `public` + 成败返回（`bool` / `OperationResult` / `Task<…>`）的方法，即**自动**进入能力目录 `GET /appagent/manifest`；Agent 按动作名与参数调用 `POST /appagent/actions/{name}`
 * **模态框可代理**：带对话框的入口以 `PuppetDialog.Ask` 替代 `MessageBox.Show`，Agent 经 `dialogs` 预答表代答，**永不阻塞**
 * **零配置发现**：枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json` 即得 `{app, endpoint, key}`（用户档案 ACL 隔离）；用户只需说"访问本地 9090 端口了解详情"
