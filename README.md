@@ -90,6 +90,27 @@ new PuppetWebServer().UseFormControls().Start("0.0.0.0:9090");
 | `/agent/docs` | GET | 读取内嵌 DEVELOPMENT.md（全局密钥） |
 | `/agent/usage` | GET | 使用率统计（供能力清理） |
 | `/agent/key/refresh` | POST | 刷新全局密钥 |
+| `/mcp` | POST | MCP Streamable HTTP 端点（仅全局密钥）——任何 MCP 客户端零学习成本接入，见下文《MCP 接入》 |
+
+### MCP 接入（兼容主流 Agent 外接规范）
+
+`/mcp` 是标准 MCP（Model Context Protocol）Streamable HTTP 无状态端点：`tools/list` 由 describe 动态生成（所有已注册实例 × 可调用方法，含框架合成方法），`tools/call` 转发既有 invoke 路径（鉴权 / usage 统计 / 模态安全默认全部继承）；另内置 `puppet_registry` / `puppet_describe` / `puppet_get` / `puppet_usage` / `puppet_logs` 五个固定工具。同端口同密钥，宿主启动即 MCP 可用，无需新进程。
+
+**安装（由 Agent 自主完成，需用户重启客户端一次）**：宿主已启动且 `/mcp` 可达后，按你的客户端复制对应片段写入其配置文件（密钥不进仓库，运行时填入或从环境变量读）：
+
+```jsonc
+// opencode：opencode.json
+"mcp": { "puppet": { "type": "remote", "url": "http://127.0.0.1:9090/mcp",
+  "headers": { "Authorization": "Bearer <全局密钥>" } } }
+```
+
+```jsonc
+// Cursor（.cursor/mcp.json）/ Claude Desktop（mcpServers 段）等
+"mcpServers": { "puppet": { "url": "http://127.0.0.1:9090/mcp",
+  "headers": { "Authorization": "Bearer <全局密钥>" } } }
+```
+
+写入后重启该客户端，下个会话即可直接用 Puppet 工具。`/agent/capabilities` 返回 `SupportsMcp: true` 表示当前宿主支持。仅支持 stdio 的客户端需自备 HTTP 转发壳（框架不内置）。
 
 ### 两种面向：A 自调试 / B 用户代理
 

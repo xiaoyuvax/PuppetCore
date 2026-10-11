@@ -22,9 +22,25 @@ namespace Puppet.Core.Web
         /// <summary>端点前缀</summary>
         public const string PREFIX = "/agent";
 
-        /// <summary>尝试处理 /agent/* 请求。返回 true 表示已处理。</summary>
+        /// <summary>尝试处理 /agent/* 与 /mcp 请求。返回 true 表示已处理。</summary>
         public static bool TryHandle(ref WebRequest req)
         {
+            if (req.Path == PuppetMcpHandler.PATH)
+            {
+                try
+                {
+                    return PuppetMcpHandler.TryHandle(ref req);
+                }
+                catch (Exception ex)
+                {
+                    PuppetUsage.Error("mcp", $"{req.Method} {req.Path}", ex);
+                    req.Response.StatusCode = 500;
+                    req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = false, err = ex.Message }));
+                    req.Response.SetJsonContent();
+                    return true;
+                }
+            }
+
             if (!req.Path.StartsWith(PREFIX)) return false;
 
             PuppetUsage.Track("endpoint", $"{req.Method} {req.Path} name={req.Queries?["name"]}");

@@ -194,6 +194,7 @@ internal static class SelfTest
         Console.WriteLine("PASS service, browser page and HTTP checks");
 
         await RunAppAgentSmokeAsync();
+        Console.WriteLine(Puppet.Core.Usage.PuppetUsageReport.Build());
     }
 
     /// <summary>

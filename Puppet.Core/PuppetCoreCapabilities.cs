@@ -41,6 +41,7 @@ namespace Puppet.Core
                 SupportsLogForwarder = true,
                 SupportsMultiAgent = true,
                 SupportsAppAgent = true, // v1.0 双面向：面向 B（/appagent/*）框架级支持；是否启用由宿主 UseAppAgent 决定
+                SupportsMcp = true, // /mcp Streamable HTTP 无状态端点（MCP tools）
                 TargetFramework = GetTargetFramework(asm),
                 BuildConfiguration = GetBuildConfiguration(asm)
             };
@@ -108,5 +109,7 @@ namespace Puppet.Core
         public bool SupportsMultiAgent { get; set; }
         /// <summary>支持面向 B（用户 Agent 操作接口 /appagent/*，提案 DUAL-ASPECT-PROPOSAL v1.0）</summary>
         public bool SupportsAppAgent { get; set; }
+        /// <summary>支持 MCP（/mcp Streamable HTTP 无状态端点，tools 由 describe 生成）</summary>
+        public bool SupportsMcp { get; set; }
     }
 }

@@ -132,6 +132,7 @@ internal static class SelfTest
         Console.WriteLine("PASS: authenticated HTTP user operations, validation and dispatcher-to-WPF bindings.");
 
         await RunAppAgentSmokeAsync(window, model);
+        Console.WriteLine(Puppet.Core.Usage.PuppetUsageReport.Build());
     }
 
     /// <summary>

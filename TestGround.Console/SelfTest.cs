@@ -145,6 +145,7 @@ internal static partial class SelfTest
         Check(ledger.IsStopping);
         Reject(() => ledger.Add(1, "food", ""));
         Console.WriteLine("PASS all ledger, CLI and HTTP checks");
+        Console.WriteLine(Puppet.Core.Usage.PuppetUsageReport.Build());
     }
 
     private static string Execute(ExpenseLedger ledger, string command)

@@ -147,7 +147,7 @@ namespace Puppet.Core.Extentions
             if (method?.GetCustomAttribute<PuppetIgnoreAttribute>() != null)
                 return ToAgentJson(new { ok = false, err = "method not accessible" });
 
-            PuppetUsage.Track($"invoke::{methodName}", $"{target.AgentInstanceName}.{methodName}(args={args?.Length})");
+            PuppetUsage.Track($"invoke::{type.Name}.{methodName}", $"{target.AgentInstanceName}.{methodName}(args={args?.Length})");
 
             try
             {

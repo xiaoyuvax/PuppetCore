@@ -50,6 +50,7 @@ namespace Puppet.Core.WinForms
                     {
                         var action = req.Queries?["action"];
                         var value = req.Queries?["value"];
+                        Usage.PuppetUsage.Track($"control::{action}", $"{target.AgentInstanceName}.{ctrl}");
                         req.Response.Buffer = Encoding.UTF8.GetBytes(
                             target.InvokeControl(ctrl, action, value));
                         break;

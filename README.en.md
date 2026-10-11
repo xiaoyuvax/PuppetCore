@@ -90,6 +90,27 @@ All requests require the `Authorization: Bearer <key>` header:
 | `/agent/docs` | GET | Fetch the embedded DEVELOPMENT.md (global key) |
 | `/agent/usage` | GET | Usage statistics (for capability pruning) |
 | `/agent/key/refresh` | POST | Rotate the global key |
+| `/mcp` | POST | MCP Streamable HTTP endpoint (global key) — zero-learning-cost integration for any MCP client, see below |
+
+### MCP Integration (mainstream agent spec compatibility)
+
+`/mcp` is a standard MCP (Model Context Protocol) Streamable HTTP stateless endpoint: `tools/list` is generated dynamically from describe (every registered instance × invocable method, including synthetic actions), and `tools/call` forwards to the existing invoke path (auth / usage tracking / safe modal defaults all inherited); five fixed tools are also built in: `puppet_registry` / `puppet_describe` / `puppet_get` / `puppet_usage` / `puppet_logs`. Same port, same key — MCP is available as soon as the host starts, no extra process.
+
+**Install (the agent can do this autonomously; the user restarts their client once)**: with the host running and `/mcp` reachable, copy the snippet for your client into its config file (never commit the key; fill at runtime or read from an environment variable):
+
+```jsonc
+// opencode: opencode.json
+"mcp": { "puppet": { "type": "remote", "url": "http://127.0.0.1:9090/mcp",
+  "headers": { "Authorization": "Bearer <global key>" } } }
+```
+
+```jsonc
+// Cursor (.cursor/mcp.json) / Claude Desktop (mcpServers), etc.
+"mcpServers": { "puppet": { "url": "http://127.0.0.1:9090/mcp",
+  "headers": { "Authorization": "Bearer <global key>" } } }
+```
+
+Restart the client; Puppet tools appear in the next session. `GET /agent/capabilities` returning `SupportsMcp: true` means the host supports it. Stdio-only clients need their own HTTP bridge (not bundled).
 
 ### Two Facets: A Self-Debugging / B User Proxy
 

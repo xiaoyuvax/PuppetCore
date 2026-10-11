@@ -208,6 +208,45 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 * 该日志是框架级观测，独立于各宿主实例的 `AgentLog`。
 
+## 自进化流程（usage 驱动的能力取舍）
+
+框架的使用率数据（`PuppetUsage` → `logs/Puppet_*.log`）是**长周期被动积累**的持久层，self-test 是**主动验证门**，两者互补。本节定义 Agent 如何据此自主决定接口取舍。
+
+### 接口二分法（评估边界）
+
+| 性质 | 范围 | 判据 | 处置 |
+|---|---|---|---|
+| **保守性** | `Puppet.Core.dll` 本体：协议层 `Web/*`、生命周期 `PuppetRegistry/AgentBook/SiteLock/PuppetKeyVault`、标注体系（`PuppetIgnore/PuppetExpose/PuppetHint/PuppetDescription/PuppetTest`）、发现 `ActionizePolicy/Describe/*/PuppetCoreCapabilities`、基础件 `PLog/PuppetUsage/AgentContractResolver/IPuppet/OperationResult`、B 面 `AppAgent/*`、`PuppetUiActions` 基类 | 程序集 + 命名空间，机器可判 | **永不进评估**；新增基础件时同步登记进本清单 |
+| **功能性** | ① 适配层具体能力（`Puppet.Core.WinForms` 的 action、`Puppet.Core.Wpf` 捕获等）② `Puppet.Core\Extentions\` 便利方法（保守清单唯一例外）③ 宿主暴露面（`[PuppetExpose]`/public 业务成员） | 同上 | 进 usage 评估，按判据取舍 |
+
+### usage 数据链路
+
+1. **采集**：框架自动埋点——`endpoint`（每请求）、`invoke::{类型名}.{方法名}`（每次调用）、`registration`、`resolve`、`error`。
+2. **持久化**：**不新增存储**。`logs/Puppet_*.log` 即持久层，每工程独立目录（各宿主视为独立工程）；`Reset()` 仅清内存计数，长周期不清零；要开新观测窗口就删对应日志文件。
+3. **聚合**（self-test 结尾自动执行）：glob 本工程 `logs/Puppet_*.log` → 按 `[category]` 聚合 → 长周期累计 counts + error 率；对 describe 全集做差集 → unused。
+4. **输出**（self-test 报告末尾固定三段）：
+   * `framework usage`：累计调用次数 + error 占比（按次数降序）
+   * `unused 候选`：describe 有、counts 无（已过滤保守性清单）
+   * `host surface`：宿主暴露成员各自调用情况
+5. **判据**：零用且代码无引用 → 打 `[PuppetIgnore]` 试运行一个周期 → 仍无人用则删；低用高 error → 修；高用 → 保。
+
+### 两种部署模式的闭环
+
+**源码持有模式（Agent 全自主）**
+
+* 触发：self-test 报告出现 unused/error 异常，或用户指令「分析使用率」。
+* 流程：读报告 → grep 宿主 + 框架源码交叉验证引用 → 决策 → 改 Puppet 源码 → `dotnet build` → TestGround `--self-test` 验证 → 真实宿主复测。若裁掉/新增基础件，同步更新二分法表。
+* 定位：TestGround 仅为 demo 与验证平台，**不作为决策依据**；进化主战场是用户真实项目；决策实施后在 TestGround 测试与调整。
+
+**NuGet 包模式（报告交接）**
+
+* 宿主 Agent 只有权清理**宿主暴露面** + 识别重复造轮子（该用框架能力却自写的）；不改框架行为、不继承框架类——框架缺陷必须回源码改。
+* 框架反馈 = 宿主 self-test 自动产出**标准化报告**（上述三段 + 能力缺口段：宿主 Agent 调试中绕道自实现的地方），交源码持有方 Agent 吸纳。fork 模式同理：源码持有方决定进化，包适用方只能文档反馈。
+
+### self-test 执行语义
+
+`--self-test` 是**启动参数**，不是运行中事件：`宿主.exe --self-test` → 进程启动 → 跑完自检 → 关闭退出。正常启动（无参数）的宿主完全不受影响。它是「验证门」而非「监控器」；usage 长周期统计靠日志被动积累，验证靠 self-test 主动跑。
+
 ## 外接 Web 服务器注意事项
 
 本框架默认使用**内建 WebServerBase**，端点入口参数类型（`WebRequest`/`WebResponse`）由内部引用的库提供。

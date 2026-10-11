@@ -122,6 +122,7 @@ internal static class SelfTest
         Check(form.RemoveSelectedTask() && form.TotalCount == 0, "HTTP scenario cleanup");
 
         await RunAppAgentAsync(form);
+        Console.WriteLine(Puppet.Core.Usage.PuppetUsageReport.Build());
     }
 
     /// <summary>
