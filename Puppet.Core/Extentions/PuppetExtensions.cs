@@ -153,8 +153,8 @@ namespace Puppet.Core.Extentions
             {
                 if (synthetic)
                 {
-                    var artifact = RunOnUi(target, () => AppAgent.PuppetUiActions.InvokeSynthetic(target, methodName, args));
-                    return ToAgentJson(new { ok = true, result = artifact, returnType = typeof(AppAgent.PuppetArtifact).FullName });
+                    var syntheticResult = RunOnUi(target, () => AppAgent.PuppetUiActions.InvokeSynthetic(target, methodName, args));
+                    return ToAgentJson(new { ok = true, result = syntheticResult, returnType = syntheticResult?.GetType().FullName });
                 }
 
                 var parameters = BindParameters(method, args);
@@ -590,6 +590,10 @@ namespace Puppet.Core.Extentions
             {
                 // WinForm 控件线程安全：UI 属性必须在 UI 线程读取
                 RunOnUi(target, () => { DoNavigate(); return null; });
+
+                //框架合成 state（GUI 实例的 ScreenCount/Screens 等）：无对应反射属性，导航失败也能命中（1.3.1）
+                if (AppAgent.PuppetUiActions.TryGetSyntheticState(target, path, out var synValue, out var synType))
+                    return ToAgentJson(new { ok = true, path = path, value = synValue, type = synType });
 
                 if (navError != null)
                     return ToAgentJson(new { ok = false, err = navError });

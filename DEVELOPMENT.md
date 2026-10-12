@@ -230,18 +230,33 @@ new PuppetWebServer().Start("0.0.0.0:9090");
    * `host surface`：宿主暴露成员各自调用情况
 5. **判据**：零用且代码无引用 → 打 `[PuppetIgnore]` 试运行一个周期 → 仍无人用则删；低用高 error → 修；高用 → 保。
 
-### 两种部署模式的闭环
+### 三种部署模式的闭环
 
-**源码持有模式（Agent 全自主）**
+| 模式 | 适用范围 | Agent 获取能力的方式 | 演化权限 |
+|------|----------|---------------------|----------|
+| **源码持有模式** | 单项目、需深度定制框架 | 直接阅读框架源码 + `DEVELOPMENT.md` | 完全自主：可改框架源码、重编译、推演进化 |
+| **SKILL.md 统一接入模式** | 团队/组织多项目标准化 | 安装仓库根目录 `SKILL.md`，Agent 自动加载技能 | 仅使用：不改框架、不继承框架类；问题反馈至源码持有方 |
+| **NuGet 包模式** | 无源码依赖、稳定版本锁定 | 阅读 NuGet 包内嵌的 `DEVELOPMENT.md` | 仅使用：同 SKILL 模式，框架缺陷需回源码仓修复 |
+
+#### 源码持有模式（Agent 全自主）
 
 * 触发：self-test 报告出现 unused/error 异常，或用户指令「分析使用率」。
 * 流程：读报告 → grep 宿主 + 框架源码交叉验证引用 → 决策 → 改 Puppet 源码 → `dotnet build` → TestGround `--self-test` 验证 → 真实宿主复测。若裁掉/新增基础件，同步更新二分法表。
 * 定位：TestGround 仅为 demo 与验证平台，**不作为决策依据**；进化主战场是用户真实项目；决策实施后在 TestGround 测试与调整。
 
-**NuGet 包模式（报告交接）**
+#### SKILL.md 统一接入模式（团队标准化）
+
+* 适用：多仓库、多项目需统一 Puppet.Core 接入规范与最佳实践。
+* 方式：将仓库根目录 `SKILL.md` 作为技能分发给团队内所有 Agent（如 opencode、Cursor 等客户端的 skill/mcp 配置）。
+* Agent 行为：自动加载 skill，按统一约定集成（端口、密钥获取、端点调用约定、自检流程），不持有框架源码、不修改框架行为。
+* 反馈回路：宿主 Agent 产出标准化 self-test 报告（usage 三段 + 能力缺口），交源码持有方 Agent 吸纳并决定框架演进。
+
+#### NuGet 包模式（报告交接）
 
 * 宿主 Agent 只有权清理**宿主暴露面** + 识别重复造轮子（该用框架能力却自写的）；不改框架行为、不继承框架类——框架缺陷必须回源码改。
 * 框架反馈 = 宿主 self-test 自动产出**标准化报告**（上述三段 + 能力缺口段：宿主 Agent 调试中绕道自实现的地方），交源码持有方 Agent 吸纳。fork 模式同理：源码持有方决定进化，包适用方只能文档反馈。
+
+> **MCP 端点（面向 B 的应用操控）**：上述三种模式均可启用 `/mcp` 端点（JSON-RPC 2.0 Streamable HTTP），将宿主应用暴露为 Agent-ready 服务。此模式**不适合 A 面（Agent 自调试）**，因宿主已编译发布、源码不可改、运行时只读；核心价值是让终端用户的个人 Agent 通过自然语言代理操作应用——**这是 Puppet 让应用变成 Agent-ready 的关键路径**。
 
 ### self-test 执行语义
 
@@ -468,13 +483,13 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 
 **屏幕环境（多屏感知）**：UI 能力实例自动带两个只读 state（`ScreensProvider` 注入时）——
 - `ScreenCount`（integer）：显示器数量（1=单屏，>1=多屏）
-- `Screens`（string）：各屏 `[索引] 设备名 bounds=x,y,w×h work=x,y,w×h primary?`；Agent 按需读 `/appagent/state/Screens`，据此把窗口摆到指定屏幕。
+- `Screens`（string）：各屏 `[索引] 设备名 bounds=x,y,w×h work=x,y,w×h primary?`；Agent 按需读 `/appagent/state/Screens`，据此把窗口摆到指定屏幕。该 state 随 **GUI 型 appagent 实例**的 B 面 catalog 提供；A 面经 `/agent/state?name=<GUI实例>&path=Screens`（或 `ScreenCount`）读取（1.3.1 起）。
 
 接入（平台包设置解析器：实例 → 能力，返回 null 表示该实例无 UI 能力）：
 - `PuppetUiActions.UiElementResolver` / `WindowResolver` / `Confirm`（关闭确认，未注入按安全默认拒绝）/ `ScreensProvider`（屏幕枚举）/ `CaptureResolver`（内部截屏：实例 → `IPuppetCapture`，返回 null = 该实例无此能力）。
 - WinForms 包：`UseFormControls()` 自动调用 `WinFormsPuppetUiActions.UsePuppetUiActions()`，把 `Form` / `Control` 适配为上述能力并注入 `Screen.AllScreens`。WPF 包 `Puppet.Core.Wpf`：宿主 `new PuppetWebServer().UseWpfCapture()` 注入 `RenderTargetBitmap` 适配（`Window` / `FrameworkElement`）。Web 包照此提供适配器（DOM rect / CSS display / fullscreen）。
 
-**内部截屏 `CaptureAction`（A 面合成方法，1.3.0）**：截屏**刻意不进 B 面 manifest**，只作为 A 面合成方法暴露，避免与用户共享操作流程。框架没有通用的"A 面合成 action"机制——`/agent/describe`（`CapabilityDescriber.Describe`）与 `/agent/invoke`（`PuppetExtensions.Invoke`）各自独立反射，故必须两处同步注入：`PuppetUiActions.DescribeSynthetic()` 补进方法目录、`IsSynthetic()` 先于反射分派、`InvokeSynthetic()` 执行并把 `PuppetArtifact`（PNG 字节）以 base64 内联进 `result`（A 面无 asset store 通道，故意如此）。describe 与 invoke 共用同一份 `CaptureParams` 位置表：`[x, y, width, height]`，四个参数全可选，`width/height <= 0` 或省略 = 整个元素；执行包在 `Invoke` 既有的 `RunOnUi` 编组内（UI 线程）。`CaptureResolver` 未注入时 describe 不出现该方法、invoke 返回 `method not found`。
+**内部截屏 `CaptureAction`（A 面合成方法，1.3.0）**：截屏**刻意不进 B 面 manifest**，只作为 A 面合成方法暴露，避免与用户共享操作流程。框架没有通用的"A 面合成 action"机制——`/agent/describe`（`CapabilityDescriber.Describe`）与 `/agent/invoke`（`PuppetExtensions.Invoke`）各自独立反射，故必须两处同步注入：`PuppetUiActions.DescribeSynthetic()` 补进方法目录、`IsSynthetic()` 先于反射分派、`InvokeSynthetic()` 执行并把 `PuppetArtifact`（PNG 字节）以 base64 内联进 `result`（A 面无 asset store 通道，故意如此）。describe 与 invoke 共用同一份 `CaptureParams` 位置表：`[x, y, width, height]`，四个参数全可选，`width/height <= 0` 或省略 = 整个元素；执行包在 `Invoke` 既有的 `RunOnUi` 编组内（UI 线程）。`CaptureResolver` 未注入时 describe 不出现该方法、invoke 返回 `method not found`。1.3.1 起，A 面合成方法同时覆盖该实例适用的全部 UI 基础 action（与 B 面同一份 `ForInstance` 参数表、按位置绑定，返回 `OperationResult`）；`CaptureAction` 仍返回产物。
 
 规则：
 - `ActionizePolicy.Scan(type, instance)` 在 `instance` 具备 UI 能力时追加这些基础 action 与屏幕 state；**宿主已声明的同名成员优先**（不重复）。

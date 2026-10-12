@@ -7,6 +7,7 @@ using Xunit;
 namespace Puppet.Core.Tests
 {
     /// <summary>A 面合成方法 CaptureAction（1.3.0）：describe/invoke 注入一致性、位置参数契约、产物 base64 往返。</summary>
+    [Collection("PuppetUiActions")]
     public class CaptureActionTests : IDisposable
     {
         private static readonly byte[] Png =

@@ -6,14 +6,16 @@
 
 ### Overview
 
-**Puppet.Core** is a .NET control framework built by AI agents, for AI agents: it automatically exposes controllable WebApi endpoints for any .NET type (including WinForms windows and controls), generates capability descriptions via reflection, and supports runtime state queries, property read/write, and method invocation.
+**Puppet.Core** is a .NET control framework built by AI agents, for AI agents: it automatically exposes controllable WebAPI endpoints for any .NET type (WinForms, WPF, ASP.NET Core, Console, etc.), generates capability descriptions via reflection, and supports runtime state queries, property read/write, and method invocation.
 
-It is not a library for human developers — it is a tool for agents. Its purpose is to support two things **at runtime**:
+**Core positioning: a tool for agents, not a library for human developers.** At runtime it serves two core purposes:
 
-1. **Agent self-debugging** (facet A) — agents use it to simulate real user interactions and observe runtime state, driving automated debugging and testing of host applications.
-2. **Users operating an application through an agent via natural language** (facet B) — turning an app into an "agent-operable" application form: the user gives natural-language instructions to their personal agent, and the agent drives the app through semantic actions to complete the workflow, **with no UI Automation** (not driven by screenshots or synthesized input, no dependence on focus or control handles).
+| Core Capability | Facet | Endpoints | Description |
+|----------------|-------|-----------|-------------|
+| **① Agent Auto-debugging** | **A** | `/agent/*` | **Auto = Self + Automatic**: dev-time agent owns source & can recompile; simulates real user actions, observes runtime state, **automates** the debugging & testing loop. |
+| **② Agent-ready** (make apps agent-operable) | **B** | `/appagent/*` + `/mcp` | Turn **compiled/shipped apps** into Agent-ready services: users give natural-language instructions, agents drive apps via **semantic actions** (Actionize), **zero UI Automation** (no screenshots/synthesized input, no focus/handle dependence). |
 
-One kernel, two facades: `/agent/*` (A, self-debugging) and `/appagent/*` (B, user proxy) — see "Two Facets: A Self-Debugging / B User Proxy" below.
+One kernel, two facades: `/agent/*` (A, auto-debugging) and `/appagent/*`, `/mcp` (B, user proxy) — see "Two Facets: A Auto-Debugging / B User Proxy" below.
 
 ### Integration Modes
 
@@ -33,14 +35,29 @@ Puppet.Core enables agents to **automatically debug applications** — specifica
 | Puppet.Core | Generic core: interfaces, serialization, capability description, registry, web endpoints, built-in web server, usage logging, console process diagnostics |
 | Puppet.Core.WinForms | WinForms support: control-tree traversal, Click / Text / Select operations |
 | Puppet.Core.Wpf | WPF support: internal screen capture adapter (`RenderTargetBitmap`), wired up by the host via `UseWpfCapture()` |
-| TestGround.Winform | WinForms workbench (task board): standing lab for framework self-debugging and evolution |
-| TestGround.Console | Console workbench (expense ledger): integration and verification lab for command-line hosts |
-| TestGround.Wpf | WPF workbench (reading list): data-binding and Dispatcher scenario lab |
-| TestGround.AspNetCore | ASP.NET Core workbench (inventory reservations): web service and concurrency lab |
+| TestGround.Winform | WinForms demo app (task board) |
+| TestGround.Console | Console demo app (expense ledger) |
+| TestGround.Wpf | WPF demo app (reading list) |
+| TestGround.AspNetCore | ASP.NET Core demo app (inventory reservations) |
 
-### TestGround: self-debugging and evolution labs
+### TestGround: demos for four host types
 
-The four TestGround apps are the framework's training grounds. Each implements a small but genuinely useful application (task board, expense ledger, reading list, inventory reservations) covering four typical host shapes: WinForms, Console, WPF, and ASP.NET Core. By continuously working on them — simulating real user actions through Puppet endpoints, observing state, and surfacing issues — agents progressively cover the design landscape of each app type and distill experience into each project's own `AGENTS.md` / `README.md` / `DEVELOPMENT.md`, which in turn drives framework fixes and evolution. Principles: app code stays elegant, clear, concise, and pleasant for humans; framework changes must be driven by reproducible evidence, never speculative features.
+TestGround is only **demonstration projects applying Puppet.Core to four .NET application types** (WinForms, Console, WPF, ASP.NET Core):
+- Provide **developers and agents** with runnable, readable reference implementations to quickly understand how to integrate and use Puppet.Core in real hosts
+- **Not the primary driver for framework improvements** — they are simple apps without complex/deep logic architectures or rich business content
+- Framework evolution happens in **users' real projects**; TestGround serves only as a verification platform (see [DEVELOPMENT.md#两种部署模式的闭环](DEVELOPMENT.md#两种部署模式的闭环))
+
+### Deployment scenarios (per DEVELOPMENT.md)
+
+How Puppet.Core is deployed determines how agents acquire framework knowledge and capabilities:
+
+| Scenario | Scope | How the agent gets capabilities | Typical use case |
+|----------|-------|--------------------------------|------------------|
+| **Single-project integration** | One host project | Feed the Puppet.Core GitHub URL or `DEVELOPMENT.md` directly to the agent | Rapid prototyping, personal projects, one-off debugging tasks |
+| **Multi-project standardization** | Team/org with multiple projects | Install `SKILL.md` (repo root); agent auto-loads the skill | Team standardization, multi-repo onboarding, CI/CD integration |
+| **Host as a service (MCP endpoint)** | Expose the host app as a service | Enable the `/mcp` endpoint (JSON-RPC 2.0); any MCP client connects with zero learning curve | **B-facing app control** — turn a compiled/shipped app into an Agent-ready service; **not suited for A (agent self-debugging)** since host source is unavailable and runtime is read-only |
+
+> **Key distinction**: A-facet (`/agent/*`) targets **development-time agents** (have source, can recompile) for self-debugging; B-facet (`/appagent/*` and `/mcp`) targets **end-users' personal agents** (app is shipped, no code changes) for natural-language proxy operations. **A core purpose of Puppet is to make host apps Agent-ready** — by exposing semantic capabilities via `/mcp`, not UI Automation.
 
 ### Quick Start (for Agent)
 
@@ -153,6 +170,28 @@ How capable facet B is depends on how many "actions" have been actionized in the
 
 * **Facet A (self-debugging loop) is mature**: state is readable down to a single property (`/agent/get?path=a.b.c`), `invoke` blocks until the `Task` completes, cross-thread calls are marshalled back to the UI thread, and complete business flows can be driven reliably in practice.
 * **Facet B (proxying user operations) is still exploratory**: the main bottleneck is **action coverage** — the Actionize paradigm only collects methods already written as `public` with a success/failure return, while many user operations still live inside private event handlers, and there is currently **no completeness gate** binding "UI control ↔ action". For a systematic way to find and close those gaps, see the "Actionize 覆盖度扫描" section in [DEVELOPMENT.md](DEVELOPMENT.md).
+
+### In-App Screenshot
+
+Puppet.Core provides **in-app screenshot** capability — **no OS/UI Automation screen capture**. Instead, the application itself renders the pixels and returns a PNG. The process never intercepts input, never covers the UI, and on multi-monitor setups never produces a full-screen image, adhering to the "no shared operation path" principle.
+
+| Host Type | Implementation | Integration | Key Points |
+|-----------|----------------|-------------|------------|
+| **WinForms** | `Control.DrawToBitmap` reads the control's own rendered pixels | `new PuppetWebServer().UseFormControls().Start(...)` auto-injects | Any control/form region; mixed-DPI multi-monitor offset fixed |
+| **WPF** | `RenderTargetBitmap` renders the visual tree | Host calls `UseWpfCapture()` (requires `Puppet.Core.Wpf` reference) | Any `Visual` element; element-level or window-level |
+| **ASP.NET Core** | Page side: DOM clone → inline computed styles per element → SVG foreignObject → `<img>` data:URL decode → canvas → PNG | Code ships with page, **off by default**; user checks "Allow Puppet to capture this page image" → page polls `GET /api/screenshot/pending` every second, posts back base64 PNG | **Opt-in, not standing capability**; user can uncheck/navigate away to stop; Puppet cannot self-enable; PNG magic bytes validated, 8B–1.5MB, id must match; 5s timeout |
+
+**Unified invocation protocol (A-facet synthetic method)**:
+```http
+POST /agent/invoke?name=<instance>&method=CaptureAction
+Content-Type: application/json
+Authorization: Bearer <key>
+
+[10, 20, 300, 200]  // x, y, width, height (all optional; omit/≤0 = whole element)
+```
+Returns: `PuppetArtifact` (base64-inlined PNG bytes). Same `describe`/`invoke` contract across all three host types.
+
+> **Key difference**: traditional UI Automation relies on OS full-screen capture / synthesized input — fragile to focus, occlusion, multi-monitor. Puppet's in-app screenshot is **the pixels the app itself painted**; the agent merely "takes a look" — no focus contention, no user interference, concurrent-safe, auditable.
 
 ### Documentation
 

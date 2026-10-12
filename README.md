@@ -6,14 +6,16 @@
 
 ### 简介
 
-**Puppet.Core** 是一个由 AI Agent 自己开发出来、并为 AI Agent 使用而设计的 .NET 操控框架：为任意 .NET 类型（含 WinForms 窗体与控件）自动暴露可操控的 WebApi 接口，通过反射生成能力描述，支持运行时状态查询、属性读写与方法调用。
+**Puppet.Core** 是一个由 AI Agent 自己开发、为 AI Agent 设计的 .NET 操控框架：为任意 .NET 类型（WinForms、WPF、ASP.NET Core、Console 等）自动暴露可操控的 WebAPI，通过反射生成能力描述，支持运行时状态查询、属性读写与方法调用。
 
-它不是给开发者用的库，而是 Agent 的工具。其目的是在**运行时**支持两件事：
+**核心定位：Agent 的工具，非开发者库**。运行时服务于两大核心目的：
 
-1. **Agent 自动调试**（面向 A）——Agent 借助它模拟真实用户操作、观测运行时状态，对宿主程序实施自动化调试与测试。
-2. **用户通过自然语言操作 Agent 来操控应用**（面向 B）——把应用变成一种"Agent 可代理操控"的新型应用形态：用户对个人 Agent 下达自然语言指令，Agent 以语义化动作驱动应用完成操作流程，**无需 UI Automation**（不靠截屏 / 合成输入驱动，不依赖焦点与控件句柄）。
+| 核心能力 | 面向 | 端点 | 说明 |
+|----------|------|------|------|
+| **① Agent Auto-debugging**（Agent 自动调试） | **A 面** | `/agent/*` | **Auto = Self + Automatic**：开发期 Agent 拥有源码、可重编译；模拟真实用户操作、观测运行时状态，**自动化**实施调试与测试闭环。 |
+| **② Agent-ready**（应用即 Agent 就绪） | **B 面** | `/appagent/*` + `/mcp` | 让**已编译发布的应用**变成 Agent 可代理操控的服务：用户用自然语言下指令，Agent 以**语义化动作**（Actionize）驱动应用，**零 UI Automation**（无截屏/合成输入、无焦点/句柄依赖）。 |
 
-一套内核、两个门面：`/agent/*`（A 自调试）与 `/appagent/*`（B 用户代理），详见下文《两种面向：A 自调试 / B 用户代理》。
+一套内核、两个门面：`/agent/*`（A 自动调试）与 `/appagent/*`、`/mcp`（B 用户代理），详见下文《两种面向：A 自动调试 / B 用户代理》。
 
 ### 两种集成方式
 
@@ -33,14 +35,29 @@ Puppet.Core 让 Agent **自动调试应用程序**——面向需要编译后进
 | Puppet.Core | 通用核心：接口、序列化、能力描述、注册表、Web 端点、内建 Web 服务器、使用日志、Console 进程诊断 |
 | Puppet.Core.WinForms | WinForms 专用：控件树遍历、Click / Text / Select 控件操作 |
 | Puppet.Core.Wpf | WPF 专用：内部截屏适配（`RenderTargetBitmap`），宿主 `UseWpfCapture()` 接入 |
-| TestGround.Winform | WinForms 工作台（任务看板）：框架自我调试与演进的常驻试验场 |
-| TestGround.Console | 控制台工作台（支出账本）：命令行宿主的集成与验证试验场 |
-| TestGround.Wpf | WPF 工作台（阅读清单）：数据绑定与 Dispatcher 场景试验场 |
-| TestGround.AspNetCore | ASP.NET Core 工作台（库存预留）：Web 服务与并发场景试验场 |
+| TestGround.Winform | WinForms 演示应用（任务看板） |
+| TestGround.Console | 控制台演示应用（支出账本） |
+| TestGround.Wpf | WPF 演示应用（阅读清单） |
+| TestGround.AspNetCore | ASP.NET Core 演示应用（库存预留） |
 
-### TestGround：自我调试与演进试验场
+### TestGround：Puppet.Core 的四类宿主演示
 
-四个 TestGround 应用是框架的"练兵场"：它们各自实现一个有实际意义的小型真实应用（任务看板、支出账本、阅读清单、库存预留），覆盖 WinForms、Console、WPF、ASP.NET Core 四类典型宿主形态。Agent 在其上持续工作——用 Puppet 端点模拟真实用户操作、观测状态、发现问题——即可逐步覆盖对应类型程序设计的方方面面，并把经验沉淀在各项目自己的 `AGENTS.md` / `README.md` / `DEVELOPMENT.md` 中，反过来驱动框架修复与演进。原则：业务代码保持优雅、清晰、简洁、面向人类审美的美观易用；框架改动必须由可复现的问题证据驱动，不投机性加功能。
+TestGround 仅是 **Puppet.Core 应用于四种 .NET 应用类型的演示项目**（WinForms、Console、WPF、ASP.NET Core）：
+- 为**开发者与 Agent** 提供可运行、可阅读的参考实现，便于快速理解如何在真实宿主中集成与使用 Puppet.Core
+- **并非驱动框架改进与演进的主要场所**——它们都是简单应用，不具备复杂/高深的逻辑架构与丰富业务内容
+- 框架演进的主战场是**用户的真实项目**；TestGround 仅作为验证平台（见 [DEVELOPMENT.md#两种部署模式的闭环](DEVELOPMENT.md#两种部署模式的闭环)）
+
+### 部署场景（对应 DEVELOPMENT.md 的三种模式）
+
+Puppet.Core 的部署方式决定了 Agent 如何获取框架知识与能力：
+
+| 场景 | 适用范围 | Agent 如何获得能力 | 典型用例 |
+|------|----------|-------------------|----------|
+| **单项目集成** | 单个宿主项目 | 直接把 Puppet.Core GitHub 地址或 `DEVELOPMENT.md` 投喂给 Agent | 快速原型、个人项目、一次性调试任务 |
+| **多项目统一** | 团队/组织多个项目 | 安装 `SKILL.md`（见仓库根目录），Agent 自动加载技能 | 团队标准化、多仓库统一接入、CI/CD 集成 |
+| **宿主即服务（MCP 端点）** | 将宿主应用作为服务暴露 | 启用 `/mcp` 端点（JSON-RPC 2.0），任意 MCP 客户端零学习成本接入 | **面向 B 的应用操控**——把已编译发布的应用变成 Agent-ready 服务；不适合 A 面（Agent 自调试），因宿主源码不可改、运行时只读 |
+
+> **关键区别**：A 面（`/agent/*`）面向**开发期 Agent**（拥有源码、可重编译），用于自动调试；B 面（`/appagent/*` 与 `/mcp`）面向**终端用户的个人 Agent**（应用已发布、不可改码），用于自然语言代理操作。**Puppet 的一大目的就是让宿主应用变成 Agent-ready**——通过 `/mcp` 暴露语义化能力，而非 UI Automation。
 
 ### 快速开始（供 Agent 阅读）
 
@@ -153,6 +170,28 @@ B 面向的能力强弱取决于项目里"被 actionize 的动作"有多少，�
 
 * **A 面向（自调试闭环）已成熟**：状态可读到单属性粒度（`/agent/get?path=a.b.c`），`invoke` 会阻塞等待 `Task`，跨线程自动切回 UI 线程，实测可稳定驱动完整业务流程。
 * **B 面向（代理用户操作）仍在探索**：主要瓶颈是**动作覆盖度**——Actionize 范式只收录"已写成 `public` + 成败返回"的方法，而大量用户操作仍埋在私有事件处理器里，且目前**没有完备性门禁**把"UI 控件 ↔ 动作"绑定起来。如何系统地找出并补齐这些缺口，见 [DEVELOPMENT.md](DEVELOPMENT.md) 的《Actionize 覆盖度扫描》。
+
+### 应用内截图
+
+Puppet.Core 提供**应用内截图**能力——**不走 OS/UI Automation 截屏**，而是由应用自身渲染像素并返回 PNG，全程不拦截输入、不遮挡界面、多显示器下也不产生整屏大图，符合"互不共享操作流程"原则。
+
+| 宿主类型 | 实现方式 | 接入方式 | 特点 |
+|----------|----------|----------|------|
+| **WinForms** | `Control.DrawToBitmap` 读取控件自身已绘制像素 | `new PuppetWebServer().UseFormControls().Start(...)` 自动注入 | 支持任意控件/窗体区域截取；混合 DPI 多显示器已修复裁切偏移 |
+| **WPF** | `RenderTargetBitmap` 渲染可视化树 | 宿主调用 `UseWpfCapture()`（需引用 `Puppet.Core.Wpf`） | 支持任意 `Visual` 元素截取；元素级/窗口级均可 |
+| **ASP.NET Core** | 页面端：DOM 克隆 → 逐元素内联计算样式 → SVG foreignObject → `<img>` data:URL 解码 → canvas → PNG | 页面随代码下发，**默认关闭**；用户勾选"允许 Puppet 获取本页渲染截图"后才每秒轮询 `GET /api/screenshot/pending`，回传 base64 PNG | **按需授权、非常设能力**；用户可随时取消勾选/离页停止；Puppet 无法自行开启；PNG 魔数校验、8B~1.5MB、id 匹配；5s 超时 |
+
+**统一调用协议（A 面合成方法）**：
+```http
+POST /agent/invoke?name=<实例名>&method=CaptureAction
+Content-Type: application/json
+Authorization: Bearer <key>
+
+[10, 20, 300, 200]  // x, y, width, height（全可选，省略/≤0 = 整个元素）
+```
+返回：`PuppetArtifact`（base64 内联 PNG 字节）。同一 `describe/invoke` 契约覆盖所有三类宿主。
+
+> **关键区别**：传统 UI Automation 靠 OS 截全屏/合成输入，易受焦点/遮挡/多屏干扰；Puppet 的应用内截图是**应用自己画好的像素**，Agent 只是"看一眼"——不抢焦点、不干扰用户、可并发、可审计。
 
 ### 文档
 

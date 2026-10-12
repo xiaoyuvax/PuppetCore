@@ -112,7 +112,7 @@ namespace Puppet.Core.AppAgent
     /// 原则：**仅 GUI 才有的基础操作默认 Actionize**。
     /// 与 UI 平台无关——WinForms（Form/Control）、WPF（Window/FrameworkElement）、Web（DOM rect / CSS display / fullscreen）
     /// 都可提供适配。
-    /// 另提供 A 面**合成方法** <see cref="CaptureAction"/>：经 <see cref="DescribeSynthetic"/> 进 /agent/describe、
+    /// 另提供 A 面**合成方法**（UI 基础 action + <see cref="CaptureAction"/>，1.3.1 起）：经 <see cref="DescribeSynthetic"/> 进 /agent/describe、
     /// 经 <see cref="InvokeSynthetic"/> 由 /agent/invoke 分派（探测用途，刻意不进 B 面 manifest）。
     /// </summary>
     public static class PuppetUiActions
@@ -225,6 +225,22 @@ namespace Puppet.Core.AppAgent
                 ValueProvider = _ => FormatScreens(ScreensProvider())
             });
             return list;
+        }
+
+        /// <summary>A 面查询合成 state（GUI 实例的 ScreenCount/Screens 等）：命中即返回当前值与类型名。</summary>
+        public static bool TryGetSyntheticState(object instance, string path, out object value, out string typeName)
+        {
+            value = null;
+            typeName = null;
+            if (instance == null || string.IsNullOrEmpty(path) || path.IndexOf('.') >= 0) return false;
+            var state = StatesForInstance(instance)
+                .FirstOrDefault(s => string.Equals(s.Name, path, StringComparison.Ordinal));
+            if (state == null) return false;
+            value = state.ValueProvider?.Invoke(instance);
+            typeName = state.TypeName == "integer" ? typeof(int).FullName
+                : state.TypeName == "number" ? typeof(double).FullName
+                : typeof(string).FullName;
+            return true;
         }
 
         private static string FormatScreens(IReadOnlyList<PuppetScreen> screens)
@@ -349,7 +365,27 @@ namespace Puppet.Core.AppAgent
         public static List<MethodDesc> DescribeSynthetic(object instance)
         {
             var list = new List<MethodDesc>();
-            if (instance == null || CaptureResolver?.Invoke(instance) == null) return list;
+            if (instance == null) return list;
+
+            // UI 基础 action（1.3.1 起进 A 面 describe：与 B 面同一份 ForInstance 清单，执行走 Execute）
+            foreach (var ba in ForInstance(instance))
+                list.Add(new MethodDesc
+                {
+                    Name = ba.Name,
+                    ReturnType = typeof(OperationResult).FullName,
+                    Summary = ba.Desc,
+                    SummarySource = InfoSource.PuppetDescription,
+                    Parameters = (ba.Params ?? new List<ActionizePolicy.ParamInfo>()).Select(p => new ParamDesc
+                    {
+                        Name = p.Name,
+                        Type = p.Type,
+                        Summary = p.Desc,
+                        SummarySource = InfoSource.PuppetDescription,
+                        IsOptional = !p.Required
+                    }).ToList()
+                });
+
+            if (CaptureResolver?.Invoke(instance) == null) return list;
             list.Add(new MethodDesc
             {
                 Name = CaptureAction,
@@ -371,15 +407,37 @@ namespace Puppet.Core.AppAgent
 
         /// <summary>A 面 invoke 判定：该实例的该方法名是否为框架合成方法（命中才走 <see cref="InvokeSynthetic"/>）。</summary>
         public static bool IsSynthetic(object instance, string methodName)
-            => methodName == CaptureAction && instance != null && CaptureResolver?.Invoke(instance) != null;
+        {
+            if (instance == null) return false;
+            if (methodName == CaptureAction) return CaptureResolver?.Invoke(instance) != null;
+            return IsUiBaseActionName(methodName)
+                && (UiElementResolver?.Invoke(instance) != null || WindowResolver?.Invoke(instance) != null);
+        }
+
+        private static bool IsUiBaseActionName(string methodName) => methodName is MoveAction or ResizeAction
+            or SetBoundsAction or SetVisibleAction or SetEnabledAction or SetWindowStateAction
+            or ActivateAction or CloseWindowAction or FocusAction or SetTopMostAction
+            or SetTitleAction or SetOpacityAction;
 
         /// <summary>
-        /// A 面 invoke 执行框架合成方法（参数位置与 <see cref="DescribeSynthetic"/> 一致）。
+        /// A 面 invoke 执行框架合成方法（参数位置与 <see cref="DescribeSynthetic"/> 一致；UI 基础 action 返回 OperationResult，CaptureAction 返回产物）。
         /// 返回产物；失败抛异常，由调用方按 A 面既有错误形状（ok/err/stack）返回。调用方须先用 <see cref="IsSynthetic"/> 判定。
         /// </summary>
-        public static PuppetArtifact InvokeSynthetic(object instance, string methodName, object[] args)
+        public static object InvokeSynthetic(object instance, string methodName, object[] args)
         {
-            if (methodName != CaptureAction) return null;
+            if (methodName != CaptureAction)
+            {
+                // UI 基础 action：与 describe 同一份 ForInstance 参数表，A 面按位置绑定后执行（args 为 JSON 反序列化对象，需解包）
+                var member = ForInstance(instance).FirstOrDefault(a => a.Name == methodName);
+                if (member == null) throw new InvalidOperationException($"该实例不支持此合成方法：{methodName}");
+                var bound = new Dictionary<string, object>();
+                for (int i = 0; i < (member.Params?.Count ?? 0); i++)
+                    if (args != null && i < args.Length && args[i] != null)
+                        bound[member.Params[i].Name] = UnwrapJson(args[i]);
+                var op = Execute(instance, methodName, bound);
+                if (op == null) throw new InvalidOperationException($"该实例不支持此 UI action：{methodName}");
+                return op;
+            }
             var capture = CaptureResolver?.Invoke(instance);
             if (capture == null) throw new InvalidOperationException("该实例不支持截屏");
 
@@ -394,6 +452,9 @@ namespace Puppet.Core.AppAgent
             if (artifact == null) throw new InvalidOperationException("截屏适配器未返回图像");
             return artifact;
         }
+
+        private static object UnwrapJson(object v)
+            => v is JToken jt ? (jt.Type == JTokenType.Null ? null : jt.ToObject<object>()) : v;
 
         private static string Geometry(IPuppetUiElement e)
             => e == null ? null : $"{e.X},{e.Y},{e.Width},{e.Height}";
