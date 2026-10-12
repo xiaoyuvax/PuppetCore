@@ -12,8 +12,8 @@
 
 | Core Capability | Facet | Endpoints | Description |
 |----------------|-------|-----------|-------------|
-| **① Agent Auto-debugging** | **A** | `/agent/*` | **Auto = Self + Automatic**: dev-time agent owns source & can recompile; simulates real user actions, observes runtime state, **automates** the debugging & testing loop. |
-| **② Agent-ready** (make apps agent-operable) | **B** | `/appagent/*` + `/mcp` | Turn **compiled/shipped apps** into Agent-ready services: users give natural-language instructions, agents drive apps via **semantic actions** (Actionize), **zero UI Automation** (no screenshots/synthesized input, no focus/handle dependence). |
+| **① Agent Auto-debugging** | **A** | `/agent/*` | **Auto = Self + Automatic**: dev-time agent owns source & can recompile; simulates real user actions, observes runtime state, **automates** the debugging & testing loop. Typical prompt: "Use Puppet to debug it yourself until every issue is solved." |
+| **② Agent-ready** (make apps agent-operable) | **B** | `/appagent/*` + `/mcp` | Turn **compiled/shipped apps** into Agent-ready services: users give natural-language instructions, agents drive apps via **semantic actions** (Actionize), **zero UI Automation** (no screenshots/synthesized input, no focus/handle dependence). Typical prompt: "Actionize every form control — all menus, buttons and operable controls." |
 
 One kernel, two facades: `/agent/*` (A, auto-debugging) and `/appagent/*`, `/mcp` (B, user proxy) — see "Two Facets: A Auto-Debugging / B User Proxy" below.
 
@@ -204,6 +204,10 @@ Returns: `PuppetArtifact` (base64-inlined PNG bytes). Same `describe`/`invoke` c
    > Before debugging the host with PuppetCore, read `GET /agent/docs` from the host's Puppet service, passing the runtime global key in the Authorization Bearer header. If the host is not running or an older version lacks this endpoint, read DEVELOPMENT.md from the restored NuGet package. Record the service address and how to obtain the key, never the actual key in files or logs.
 
 2. **Documentation inside the NuGet package**: after restore, read `<global-packages>/puppet.core/<version>/DEVELOPMENT.md`. Defaults are `%USERPROFILE%\.nuget\packages\puppet.core\<version>\DEVELOPMENT.md` on Windows and `~/.nuget/packages/puppet.core/<version>/DEVELOPMENT.md` on Linux/macOS. Run `dotnet nuget locals global-packages --list` from the host directory to locate the cache. For project-specific restore directories, use `packageFolders` in `obj/project.assets.json`; choose the Puppet.Core version actually resolved in that file, not simply the newest cached version.
+
+### Recommended companion tool
+
+* [zcurl](https://github.com/xiaoyuvax/zcurl) — on Chinese-locale Windows, agents should use it instead of curl against Puppet endpoints: Puppet command-line construction is built in, so URLs, Bearer headers and non-ASCII encoding are handled for you.
 
 ### License
 

@@ -12,8 +12,8 @@
 
 | 核心能力 | 面向 | 端点 | 说明 |
 |----------|------|------|------|
-| **① Agent Auto-debugging**（Agent 自动调试） | **A 面** | `/agent/*` | **Auto = Self + Automatic**：开发期 Agent 拥有源码、可重编译；模拟真实用户操作、观测运行时状态，**自动化**实施调试与测试闭环。 |
-| **② Agent-ready**（应用即 Agent 就绪） | **B 面** | `/appagent/*` + `/mcp` | 让**已编译发布的应用**变成 Agent 可代理操控的服务：用户用自然语言下指令，Agent 以**语义化动作**（Actionize）驱动应用，**零 UI Automation**（无截屏/合成输入、无焦点/句柄依赖）。 |
+| **① Agent Auto-debugging**（Agent 自动调试） | **A 面** | `/agent/*` | **Auto = Self + Automatic**：开发期 Agent 拥有源码、可重编译；模拟真实用户操作、观测运行时状态，**自动化**实施调试与测试闭环。典型提示词：「请使用 Puppet 自己调试直至所有问题解决」 |
+| **② Agent-ready**（应用即 Agent 就绪） | **B 面** | `/appagent/*` + `/mcp` | 让**已编译发布的应用**变成 Agent 可代理操控的服务：用户用自然语言下指令，Agent 以**语义化动作**（Actionize）驱动应用，**零 UI Automation**（无截屏/合成输入、无焦点/句柄依赖）。典型提示词：「全面 Actionize 所有窗体界面操作，每个菜单、按钮及可操作控件」 |
 
 一套内核、两个门面：`/agent/*`（A 自动调试）与 `/appagent/*`、`/mcp`（B 用户代理），详见下文《两种面向：A 自动调试 / B 用户代理》。
 
@@ -204,6 +204,10 @@ Authorization: Bearer <key>
    > 使用 PuppetCore 调试宿主前，先读取宿主 Puppet 服务的 `GET /agent/docs`，通过 Authorization Bearer 头传递运行时全局密钥；宿主未启动或所用旧版本不支持此端点时，读取已还原 NuGet 包中的 DEVELOPMENT.md。记录服务地址及密钥获取方式，不要将实际密钥写入文件或日志。
 
 2. **NuGet 包内文档**：还原依赖后，可读取 `<global-packages>/puppet.core/<version>/DEVELOPMENT.md`。Windows 默认路径为 `%USERPROFILE%\.nuget\packages\puppet.core\<version>\DEVELOPMENT.md`，Linux/macOS 为 `~/.nuget/packages/puppet.core/<version>/DEVELOPMENT.md`。在宿主目录运行 `dotnet nuget locals global-packages --list` 查询缓存位置；如工程自定义了还原目录，以 `obj/project.assets.json` 中的 `packageFolders` 为准，`<version>` 使用该文件中实际解析的 Puppet.Core 版本，而非任取缓存中的最新版本。
+
+### 配套工具推荐
+
+* [zcurl](https://github.com/xiaoyuvax/zcurl) —— 中文 Windows 环境下，建议 Agent 用它替代 curl 调用 Puppet 端点：内建 Puppet 命令行拼接支持，免去手工拼 URL、Bearer 头与中文编码的麻烦。
 
 ### 许可证
 
