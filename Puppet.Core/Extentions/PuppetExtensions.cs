@@ -610,7 +610,7 @@ namespace Puppet.Core.Extentions
                 // 复杂对象：不序列化整个对象图。FileMan/Form/WebView2 等对象含跨线程不可访问成员，
                 // 在 web 线程序列化会触发跨线程异常或访问已释放原生资源导致进程崩溃。
                 // 返回类型信息，Agent 通过更深路径（如 'path.MemberName'）查询具体值。
-                return ToAgentJson(new { ok = true, path = path, value = (object)null, type = navType, note = "complex object; query a deeper path (e.g. '" + path + ".<member>') to inspect specific members" });
+                return ToAgentJson(new { ok = true, path = path, value = (object)null, type = navType, note = ComplexObjectNote(path, navResult) });
             }
             catch (Exception ex)
             {
@@ -620,6 +620,16 @@ namespace Puppet.Core.Extentions
                     : ex.Message;
                 return ToAgentJson(new { ok = false, err = msg });
             }
+        }
+
+        /// <summary>复杂对象的 note 文案：按类型给"下一步查哪里"的针对性提示。
+        /// 只按类型名判定（Puppet.Core 不引用 WinForms），新增陷阱类型在此追加分支即可。</summary>
+        internal static string ComplexObjectNote(string path, object value)
+        {
+            // ListView 条目：.Text 是按列宽截断的显示值，真数据在 .Tag —— 实测曾因此把截断文本填进 prompt
+            if (value != null && value.GetType().Name == "ListViewItem")
+                return $"ListView item; '{path}.Text' is display text (may be truncated to fit the column) — query '{path}.Tag' for the real object, '{path}.SubItems[i].Text' for cells";
+            return "complex object; query a deeper path (e.g. '" + path + ".<member>') to inspect specific members";
         }
 
         /// <summary>

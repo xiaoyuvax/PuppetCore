@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+		<TargetFrameworks>net8.0;net10.0;net10.0-windows7.0</TargetFrameworks>
 		<LangVersion>12.0</LangVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>disable</Nullable>
@@ -9,6 +9,14 @@
 		<IsAotCompatible>false</IsAotCompatible>
 		<EnableTrimAnalyzer>false</EnableTrimAnalyzer>
 	</PropertyGroup>
+
+	<!-- 仅 windows TFM 编译 WinForms 扩展测试（ToolStrip 寻址等），其余 TFM 移除该文件 -->
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows7.0'">
+		<UseWindowsForms>true</UseWindowsForms>
+	</PropertyGroup>
+	<ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows7.0'">
+		<Compile Remove="FormPuppetExtensionsTests.cs" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
@@ -21,6 +29,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\Puppet.Core\Puppet.Core.csproj" />
+		<ProjectReference Include="..\..\Puppet.Core.WinForms\Puppet.Core.WinForms.csproj" Condition="'$(TargetFramework)' == 'net10.0-windows7.0'" />
 	</ItemGroup>
 
 </Project>

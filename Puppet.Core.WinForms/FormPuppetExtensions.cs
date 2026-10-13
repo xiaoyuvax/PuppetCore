@@ -6,10 +6,12 @@ namespace Puppet.Core.WinForms
     /// <summary>
     /// WinForm 窗体控件树遍历与控件操作扩展。
     /// 提供 DescribeControls（控件能力描述）和 InvokeControl（控件操作）。
+    /// 除 Control 树外，还枚举 ToolStrip/MenuStrip/StatusStrip 里的 ToolStripItem（工具栏按钮、菜单项
+    /// 都不是 Control，纯控件树遍历不到——实测盲区：tsbUpload 这类工具栏按钮对 /agent/control 不可见）。
     /// </summary>
     public static class FormAgentExtensions
     {
-        /// <summary>枚举窗体所有可操作控件及其状态</summary>
+        /// <summary>枚举窗体所有可操作控件及其状态（Control 树 + ToolStripItem）</summary>
         public static string DescribeControls(this IPuppet form)
         {
             if (form is not Control root) return Utils.ToJson(new { ok = false, err = "not a form" });
@@ -25,14 +27,26 @@ namespace Puppet.Core.WinForms
                 capabilities = GetControlCapabilities(c)
             });
 
-            return Utils.ToJson(new { ok = true, controls });
+            var items = WalkToolStripItems(root, root).Select(i => new
+            {
+                name = i.Name,
+                text = i.Text,
+                type = i.GetType().Name,
+                enabled = i.Enabled,
+                visible = i.Visible,
+                bounds = new { x = i.Bounds.X, y = i.Bounds.Y, w = i.Bounds.Width, h = i.Bounds.Height },
+                capabilities = GetItemCapabilities(i)
+            });
+
+            // 两段匿名类型结构相同 → 同一类型，可合并进同一个 controls 数组
+            return Utils.ToJson(new { ok = true, controls = controls.Concat(items) });
         }
 
         /// <summary>执行控件操作（Click/SetText/SelectIndex/Toggle 等）。
-        /// 控件树找不到时回落到菜单项（ToolStripMenuItem 不是 Control，需单独寻址）。</summary>
+        /// 控件树找不到时回落到 ToolStripItem（工具栏按钮/菜单项都不是 Control，需单独寻址）。</summary>
         /// <param name="form">目标窗体</param>
-        /// <param name="controlName">控件名或菜单项名</param>
-        /// <param name="action">操作类型：click/settext/select/toggle/getvalue/setvalue</param>
+        /// <param name="controlName">控件名或 ToolStripItem 名</param>
+        /// <param name="action">操作类型：click/settext/select/toggle/getvalue/setvalue/gettext</param>
         /// <param name="value">操作值</param>
         public static string InvokeControl(this IPuppet form, string controlName, string action, object value = null)
         {
@@ -40,11 +54,11 @@ namespace Puppet.Core.WinForms
             var ctrl = FindControl(root, controlName);
             if (ctrl == null)
             {
-                var mi = FindMenuItem(root, controlName);
-                if (mi == null) return Utils.ToJson(new { ok = false, err = "control not found" });
+                var item = FindToolStripItem(root, root, controlName);
+                if (item == null) return Utils.ToJson(new { ok = false, err = "control not found" });
                 if (root.InvokeRequired)
-                    return (string)root.Invoke(new Func<string>(() => InvokeMenuItemCore(mi, action)));
-                return InvokeMenuItemCore(mi, action);
+                    return (string)root.Invoke(new Func<string>(() => InvokeToolStripItemCore(item, action)));
+                return InvokeToolStripItemCore(item, action);
             }
 
             if (ctrl.InvokeRequired)
@@ -52,24 +66,24 @@ namespace Puppet.Core.WinForms
             return InvokeControlCore(ctrl, action, value);
         }
 
-        /// <summary>获取指定控件或菜单项的运行时状态</summary>
+        /// <summary>获取指定控件或 ToolStripItem 的运行时状态</summary>
         public static string GetControlState(this IPuppet form, string controlName)
         {
             if (form is not Control root) return Utils.ToJson(new { ok = false, err = "not a form" });
             var ctrl = FindControl(root, controlName);
             if (ctrl == null)
             {
-                var mi = FindMenuItem(root, controlName);
-                if (mi == null) return Utils.ToJson(new { ok = false, err = "control not found" });
+                var item = FindToolStripItem(root, root, controlName);
+                if (item == null) return Utils.ToJson(new { ok = false, err = "control not found" });
                 return Utils.ToJson(new
                 {
                     ok = true,
-                    name = mi.Name,
-                    text = mi.Text,
-                    type = mi.GetType().Name,
-                    enabled = mi.Enabled,
-                    visible = mi.Visible,
-                    checkedState = mi.Checked
+                    name = item.Name,
+                    text = item.Text,
+                    type = item.GetType().Name,
+                    enabled = item.Enabled,
+                    visible = item.Visible,
+                    checkedState = CheckedStateOf(item)
                 });
             }
             return Utils.ToJson(new
@@ -97,6 +111,34 @@ namespace Puppet.Core.WinForms
             }
         }
 
+        /// <summary>遍历所有 ToolStrip（MenuStrip/ToolStrip/StatusStrip 同根）里的条目，含 DropDown 子项。
+        /// [PuppetIgnore] 按「声明该字段的类型」与 root 两级判定（Designer 把条目字段声明在 Form 上，
+        /// UserControl 自带工具栏时声明在 UserControl 上）。</summary>
+        private static IEnumerable<ToolStripItem> WalkToolStripItems(Control root, Control parent)
+        {
+            foreach (Control c in parent.Controls)
+            {
+                if (c is ToolStrip ts)
+                    foreach (ToolStripItem i in ts.Items)
+                    {
+                        if (IsPuppetIgnored(root, ts, i)) continue;
+                        yield return i;
+                        foreach (var d in WalkToolStripItemChildren(i)) yield return d;
+                    }
+                foreach (var d in WalkToolStripItems(root, c)) yield return d;
+            }
+        }
+
+        private static IEnumerable<ToolStripItem> WalkToolStripItemChildren(ToolStripItem item)
+        {
+            if (item is not ToolStripDropDownItem dd) yield break;
+            foreach (ToolStripItem child in dd.DropDownItems)
+            {
+                yield return child;
+                foreach (var d in WalkToolStripItemChildren(child)) yield return d;
+            }
+        }
+
         private static string[] GetControlCapabilities(Control c)
         {
             if (c is CheckBox) return new[] { "check", "toggle", "checked" };
@@ -110,6 +152,24 @@ namespace Puppet.Core.WinForms
             return new[] { "gettext" };
         }
 
+        private static string[] GetItemCapabilities(ToolStripItem i)
+        {
+            if (i is ToolStripMenuItem) return new[] { "click", "gettext", "checked" };
+            if (i is ToolStripButton) return new[] { "click", "gettext" };
+            return new[] { "gettext" };
+        }
+
+        private static object CheckedStateOf(ToolStripItem item) =>
+            item is ToolStripMenuItem mi ? mi.Checked :
+            item is ToolStripButton btn ? btn.Checked : (object)null;
+
+        private static bool IsPuppetIgnored(Control root, ToolStrip owner, ToolStripItem item)
+        {
+            const BindingFlags F = BindingFlags.NonPublic | BindingFlags.Instance;
+            return owner?.GetType().GetField(item.Name, F)?.GetCustomAttribute<PuppetIgnoreAttribute>() != null
+                || root.GetType().GetField(item.Name, F)?.GetCustomAttribute<PuppetIgnoreAttribute>() != null;
+        }
+
         private static Control FindControl(Control parent, string name)
         {
             foreach (Control c in parent.Controls)
@@ -121,48 +181,45 @@ namespace Puppet.Core.WinForms
             return null;
         }
 
-        /// <summary>在控件树中递归查找菜单项（含子菜单），找不到返回 null</summary>
-        private static ToolStripMenuItem FindMenuItem(Control root, string name)
+        /// <summary>在所有 ToolStrip 容器里递归查找条目（工具栏按钮/菜单项/下拉子项），找不到返回 null</summary>
+        private static ToolStripItem FindToolStripItem(Control root, Control parent, string name)
         {
-            foreach (Control c in root.Controls)
+            foreach (Control c in parent.Controls)
             {
-                if (c is MenuStrip ms)
-                {
-                    foreach (ToolStripItem item in ms.Items)
-                        if (FindMenuItemRecursive(item, name) is ToolStripMenuItem hit) return hit;
-                }
-                var found = FindMenuItem(c, name);
+                if (c is ToolStrip ts)
+                    foreach (ToolStripItem i in ts.Items)
+                        if (FindToolStripItemRecursive(i, name) is ToolStripItem hit && !IsPuppetIgnored(root, ts, hit))
+                            return hit;
+                var found = FindToolStripItem(root, c, name);
                 if (found != null) return found;
             }
             return null;
         }
 
-        private static ToolStripMenuItem FindMenuItemRecursive(ToolStripItem item, string name)
+        private static ToolStripItem FindToolStripItemRecursive(ToolStripItem item, string name)
         {
             if (item == null) return null;
-            if (item is ToolStripMenuItem mi)
-            {
-                if (mi.Name == name) return mi;
-                foreach (ToolStripItem child in mi.DropDownItems)
-                    if (FindMenuItemRecursive(child, name) is ToolStripMenuItem hit) return hit;
-            }
+            if (item.Name == name) return item;
+            if (item is not ToolStripDropDownItem dd) return null;
+            foreach (ToolStripItem child in dd.DropDownItems)
+                if (FindToolStripItemRecursive(child, name) is ToolStripItem hit) return hit;
             return null;
         }
 
-        private static string InvokeMenuItemCore(ToolStripMenuItem mi, string action)
+        private static string InvokeToolStripItemCore(ToolStripItem item, string action)
         {
             try
             {
                 switch (action)
                 {
                     case "click":
-                        if (!mi.Enabled) return Utils.ToJson(new { ok = false, err = "menu item disabled" });
-                        mi.PerformClick();
-                        return Utils.ToJson(new { ok = true, clicked = mi.Name });
+                        if (!item.Enabled) return Utils.ToJson(new { ok = false, err = "item disabled" });
+                        item.PerformClick();
+                        return Utils.ToJson(new { ok = true, clicked = item.Name });
                     case "gettext":
-                        return Utils.ToJson(new { ok = true, name = mi.Name, text = mi.Text, enabled = mi.Enabled, checkedState = mi.Checked });
+                        return Utils.ToJson(new { ok = true, name = item.Name, text = item.Text, enabled = item.Enabled, checkedState = CheckedStateOf(item) });
                     default:
-                        return Utils.ToJson(new { ok = false, err = $"unsupported action '{action}' on menu item {mi.Name}" });
+                        return Utils.ToJson(new { ok = false, err = $"unsupported action '{action}' on {item.GetType().Name} {item.Name}" });
                 }
             }
             catch (Exception ex)

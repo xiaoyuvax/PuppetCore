@@ -235,6 +235,15 @@ namespace Puppet.Core.Web
                     }
                 case "/agent/get" when req.Method == "GET":
                     {
+                        // 批量：paths=A,B,C（逗号分隔，一次往返取多个属性）；未给 paths 维持单 path 旧行为
+                        var paths = SplitCsv(req.Queries["paths"]);
+                        if (paths is { Length: > 0 })
+                        {
+                            var results = new JArray(paths.Select(p => JToken.Parse(target.GetProperty(p))));
+                            var batch = new JObject { ["ok"] = true, ["results"] = results };
+                            req.Response.Buffer = Encoding.UTF8.GetBytes(batch.ToString(Formatting.None));
+                            break;
+                        }
                         req.Response.Buffer = Encoding.UTF8.GetBytes(target.GetProperty(req.Queries["path"]));
                         break;
                     }

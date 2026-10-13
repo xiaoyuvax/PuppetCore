@@ -1,5 +1,6 @@
 using System.Text;
 using Newtonsoft.Json.Linq;
+using Puppet.Core.Extentions;
 using Puppet.Core.Web;
 using Wima.Web;
 using Xunit;
@@ -149,6 +150,100 @@ namespace Puppet.Core.Tests
                 Assert.False(json.Value<bool>("ok"));   // 未知方法 → ok:false 错误形状（不抛 500）
             }
             finally { PuppetRegistry.Unregister("InvokeMiss#1"); }
+        }
+
+        /// <summary>批量读取：paths=A,B,C 一次往返取多个属性；结果数组与单 path 顺序一致。</summary>
+        [Fact]
+        public void Get_supports_batch_paths_in_one_round_trip()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "BatchGet#1", AgentAccessKey = "batch-key" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var req = MakeReq("GET", "/agent/get", "batch-key",
+                    "name=BatchGet%231&paths=AgentInstanceName,AgentAccessKey");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                Assert.Equal(200, Concluded(req));
+
+                var json = JObject.Parse(Body(req));
+                Assert.True(json.Value<bool>("ok"));
+                var results = (JArray)json["results"];
+                Assert.Equal(2, results.Count);
+                Assert.Equal("BatchGet#1", results[0].Value<string>("value"));
+                Assert.Equal("batch-key", results[1].Value<string>("value"));
+            }
+            finally { PuppetRegistry.Unregister("BatchGet#1"); }
+        }
+
+        /// <summary>未给 paths 时维持单 path 旧契约（本测试即旧行为锚点）。</summary>
+        [Fact]
+        public void Get_without_paths_keeps_single_path_contract()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "SingleGet#1", AgentAccessKey = "s" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var req = MakeReq("GET", "/agent/get", "s", "name=SingleGet%231&path=AgentInstanceName");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var json = JObject.Parse(Body(req));
+                Assert.True(json.Value<bool>("ok"));
+                Assert.Equal("SingleGet#1", json.Value<string>("value"));
+                Assert.Null(json["results"]);   // 不是批量形状
+            }
+            finally { PuppetRegistry.Unregister("SingleGet#1"); }
+        }
+
+        /// <summary>ListView 条目的复杂对象 note 必须点名 .Tag —— 实测曾把 .Text 的列宽截断值当真数据用。</summary>
+        [Fact]
+        public void Get_list_view_item_note_points_to_Tag_not_truncated_Text()
+        {
+            var host = new ListViewHost();
+            var json = JObject.Parse(host.GetProperty("Item"));
+            Assert.True(json.Value<bool>("ok"));
+            // Newtonsoft 对 JSON null 返回 JValue(Null) 而非 C# null，判据看 TokenType
+            Assert.Equal(JTokenType.Null, json["value"].Type);
+            Assert.EndsWith("ListViewItem", json.Value<string>("type"));
+            var note = json.Value<string>("note");
+            Assert.Contains("Tag", note);
+            Assert.Contains("truncated", note);
+        }
+
+        /// <summary>非 ListViewItem 的复杂对象仍用通用 note（不误伤其它类型）。</summary>
+        [Fact]
+        public void Get_other_complex_object_keeps_generic_note()
+        {
+            var host = new ListViewHost();
+            var json = JObject.Parse(host.GetProperty("Other"));
+            var note = json.Value<string>("note");
+            Assert.Contains("complex object", note);
+            Assert.DoesNotContain("Tag", note);
+        }
+
+        /// <summary>宿主：一个名为 ListViewItem 的类（Puppet.Core 不引用 WinForms，note 判定按类型名）。</summary>
+        private sealed class ListViewHost : IPuppet
+        {
+            public string AgentAccessKey { get; set; } = "k";
+            public Common.Logging.ILog AgentLog { get; set; }
+            public string AgentInstanceName { get; set; } = "LvHost#1";
+
+            public ListViewItem Item { get; } = new ListViewItem
+            {
+                Text = "【标准脱衣】一个女孩，赛博…",     // 列宽截断的显示值
+                Tag = new { Prompt = "【标准脱衣】一个女孩，赛博朋克，8K，细节丰富" }
+            };
+
+            public NotListViewItem Other { get; } = new NotListViewItem();
+        }
+
+        private sealed class ListViewItem
+        {
+            public string Text { get; set; }
+            public object Tag { get; set; }
+        }
+
+        private sealed class NotListViewItem
+        {
+            public int Value { get; set; } = 42;
         }
     }
 }

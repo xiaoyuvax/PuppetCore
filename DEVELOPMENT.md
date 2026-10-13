@@ -81,6 +81,8 @@ WinForm 宿主需 `/agent/control` 控件端点时，用 WinForms 包扩展挂�
 new PuppetWebServer().UseFormControls().Start("0.0.0.0:9090");
 ```
 
+`/agent/control` 覆盖 **Control 树 + ToolStripItem**：工具栏按钮、菜单项、下拉子项都不是 `Control`，纯控件树遍历不到（1.4.x 起一并进 `GET /agent/control` 的 `controls` 列表，可 `action=click`/`gettext`；`[PuppetIgnore]` 对条目同样生效）。控件名即 Designer 字段名。
+
 其他自定义端点用 `UseHandler(req => myHandler.TryHandle(ref req))` 挂接（先于内建 `/agent/*` 执行）。
 
 ### 模式 C：双服务器（端口隔离）
@@ -101,7 +103,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | -------------------- | ---- | --------------------------------------------------------------------- |
 | `/agent/registry`    | GET  | 条件查询实例列表（仅全局密钥；type/tags/includeInternal/activeWithin/keyword/offset/limit） |
 | `/agent/state`       | GET  | JSONPath 查询运行时状态（`path`/`include`/`exclude`）                          |
-| `/agent/get`         | GET  | 按点分路径读单属性（`path`，如 `SelectedStateName`）——优先使用                         |
+| `/agent/get`         | GET  | 按点分路径读单属性（`path`，如 `SelectedStateName`）——优先使用；批量用 `paths=A,B,C`（逗号分隔）一次取多个 → `{ok,results:[...]}` |
 | `/agent/set`         | POST | 按点分路径写属性，触发对应 UI 事件（body: `{path,value}`）                             |
 | `/agent/describe`    | GET  | 获取实例 schema（`format=md\|json`）                                        |
 | `/agent/invoke`      | POST | 调用方法：`?name=X&method=Y`，body = JSON 数组 args\[]                        |
@@ -137,7 +139,9 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 * `/agent/invoke` 的 `name`、`method` 是**查询参数**（中文方法名需 URL 编码），`args` 放 body 的 JSON 数组。
 
-* 优先用 `/agent/get?path=<member>` 读单个值，而非序列化整对象（见「踩坑」）。
+* 优先用 `/agent/get?path=<member>` 读单个值，而非序列化整对象（见「踩坑」）。一次要读多个值时用 `paths=A,B,C`（逗号分隔），返回 `{ok:true,results:[...]}`，顺序与入参一致；只给 `path` 则维持单值旧契约。
+
+* 复杂对象的返回形状是 `value:null` + `type` 非空（**判据看 `type`，不要看 `value`**），`note` 会告诉下一步查哪里。**ListView 条目（`ListViewItem`）的 `note` 专门点名**：`.Text` 是按列宽截断的显示值，真数据在 `.Tag`（实测曾把截断文本当真数据用）。
 
 * `/agent/set` 设控件值即模拟真实用户操作（会触发对应事件），用于测试现场。
 
@@ -184,11 +188,33 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 * 强化密钥设计（含日志接口的鉴权）。交付时若保留操作类/日志类，务必复核安全性。
 
+## 模态框包裹范式（ModalPlan，1.4.1）
+
+`Puppet.Core.AppAgent.ModalPlan<TResult>` 把「一次模态调用」整体收进一个对象，用一份代码同时覆盖人工与 Agent 两种上下文——宿主包裹**任意**模态框（文件选择器、输入框、自定义窗体）的标准写法：
+
+```csharp
+var plan = new ModalPlan<string>
+{
+    Title = "选择文件",            // = 预置匹配键（与 DialogPreset.Title 精确匹配，区分大小写）
+    SafeDefaultAnswer = null,      // Agent 未预置时的安全默认（按该框语义给，如「取消」→ null）
+    Show = () => { using var d = new OpenFileDialog();           // 人工上下文：原样真弹窗
+                   return d.ShowDialog() == DialogResult.OK ? d.FileName : null; },
+    Synthesize = answer => IsCancel(answer) ? null : answer,     // Agent 上下文：答案串 → 本框结果
+};
+var file = plan.Run();
+```
+
+* `Run()` 语义：`DialogBroker.IsActive == false` → `Show()`（与未接入前行为完全一致）；为 `true` → `DialogBroker.Resolve(Title, SafeDefaultAnswer)` 取答案（B 通道 `dialogPresets` 按 `Title` 精确匹配，未预置回落 `SafeDefaultAnswer`）→ `Synthesize(答案)`，**永不弹窗**，HTTP 调用不会因模态框阻塞。
+* 答案串是**不透明载荷**：按钮名、文件路径、颜色 hex、`k=v` 都行，宿主认得即可；已应答记入 `DialogBroker.AnsweredSnapshot()`（`dialogsAnswered`）。
+* 每种框给一个 `Synthesize`（取消词判定、`|` 分隔解析……），映射逻辑收在计划里，别散进业务代码。
+* 覆盖点选一即可，不必全包：文件对话框这类「Agent 走不到 UI 层」的仍可按「宿主工程约束」的 UI/业务分层处理；ModalPlan 适用于**业务层也需要该结果**、且希望 Agent 能按 Title 预置答案的场景。
+* 参考实现：VeniceMan `FormMan.PromptForFileName` / `ChooseFiles` / `ChooseFolder`（一个计划覆盖十余个调用点），回归测试 `VeniceMan.Tests/ModalFileDialogTests.cs`。
+
 ## 宿主工程约束（Agent 必须遵守）
 
 * **优先通过既有宿主代码路径完成调试和测试**，首先不要编写/暴露专门的调试代码或方法。仅在有确切证据表明既有路径无法完成测试时，才可考虑撰写测试专用“钩子”直至任务达成；相关成员必须标注 `[PuppetTest]`（纯标记，无功能代码），并在测试完成后适时清理。
 
-* 带模态对话框（OpenFileDialog/SaveFileDialog/InputBox）的事件处理器必须拆分为 UI 层（`_Click`）与业务层（`XxxAsync/Xxx`，标 `[PuppetExpose]`）。UI 层只留对话框交互、光标、错误提示；业务层含完整逻辑，Agent 直接调业务层绕过模态框。
+* 带模态框（OpenFileDialog/SaveFileDialog/InputBox）的事件处理器必须拆分为 UI 层（`_Click`）与业务层（`XxxAsync/Xxx`，标 `[PuppetExpose]`）。UI 层只留对话框交互、光标、错误提示；业务层含完整逻辑，Agent 直接调业务层绕过模态框。业务层本身需要该框的结果（如文件路径）且希望 Agent 可按 Title 预置答案时，用上文「模态框包裹范式（ModalPlan）」。
 
 * 涉及 UI 的状态变更，异步事件完成后需**轮询就绪标志**（如 `/agent/get?path=IsReady`）再走下一步。
 
