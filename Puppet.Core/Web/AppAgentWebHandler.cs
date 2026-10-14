@@ -52,7 +52,7 @@ namespace Puppet.Core.Web
                         puppet = true,
                         protocol = "appagent/1.0",
                         auth = "profile-file",
-                        authHint = "%LOCALAPPDATA%\\Puppet.AppAgents\\<app>.json",
+                        authHint = "%LOCALAPPDATA%\\Puppet.AppAgents\\<app>.<pid>.json",
                         help = "/appagent/help"
                     }, Formatting.None));
                     req.Response.SetJsonContent();
@@ -71,14 +71,14 @@ namespace Puppet.Core.Web
                 {
                     WriteError(req, 401, "credential-invalid",
                         "missing or invalid bearer key",
-                        "read key from %LOCALAPPDATA%\\Puppet.AppAgents\\<app>.json");
+                        "read key from %LOCALAPPDATA%\\Puppet.AppAgents\\<app>.<pid>.json (glob <app>.*.json; pick the live pid)");
                     return true;
                 }
 
                 if (path == "/appagent/manifest" && req.Method == "GET")
                 {
-                    var inst = ResolveInstance(runtime, req.Queries?["name"]);
-                    if (inst == null) { WriteNoInstance(req); return true; }
+                    var inst = ResolveInstance(req, runtime, req.Queries?["name"]);
+                    if (inst == null) return true;
                     req.Response.Buffer = Encoding.UTF8.GetBytes(AppAgent.ManifestBuilder.Build(inst));
                     req.Response.SetJsonContent();
                     return true;
@@ -86,8 +86,8 @@ namespace Puppet.Core.Web
 
                 if (path.StartsWith("/appagent/actions/", StringComparison.Ordinal) && req.Method == "POST")
                 {
-                    var inst = ResolveInstance(runtime, req.Queries?["name"]);
-                    if (inst == null) { WriteNoInstance(req); return true; }
+                    var inst = ResolveInstance(req, runtime, req.Queries?["name"]);
+                    if (inst == null) return true;
                     var actionName = pathCs["/appagent/actions/".Length..];
                     var (argsObj, callId, dialogs) = ParseActionBody(req.InputStream);
                     var (status, body) = runtime.Executor.Execute(inst, actionName, argsObj, callId, dialogs);
@@ -99,8 +99,8 @@ namespace Puppet.Core.Web
 
                 if (path.StartsWith("/appagent/state/", StringComparison.Ordinal) && req.Method == "GET")
                 {
-                    var inst = ResolveInstance(runtime, req.Queries?["name"]);
-                    if (inst == null) { WriteNoInstance(req); return true; }
+                    var inst = ResolveInstance(req, runtime, req.Queries?["name"]);
+                    if (inst == null) return true;
                     var stateKey = pathCs["/appagent/state/".Length..];
                     return HandleState(req, inst, stateKey);
                 }
@@ -176,11 +176,25 @@ namespace Puppet.Core.Web
             return true;
         }
 
-        private static AppAgent.AppAgentInstance ResolveInstance(AppAgent.AppAgentRuntime runtime, string name)
+        /// <summary>实例解析（错误在此写回，null = 已写错误）。单实例时 name 可省略；
+        /// 多实例省略 name → 400 instance-name-required（静默默认 Instances[0] 会操作错窗口）。
+        /// 任何未命中错误均携带 availableInstances，B 面 Agent 无需读档案即可枚举实例名。</summary>
+        private static AppAgent.AppAgentInstance ResolveInstance(WebRequest req, AppAgent.AppAgentRuntime runtime, string name)
         {
-            if (runtime.Instances.Count == 0) return null;
-            if (string.IsNullOrEmpty(name)) return runtime.Instances[0]; // 单实例默认；多实例必须带 name
-            return runtime.Instances.FirstOrDefault(i => string.Equals(i.Name, name, StringComparison.Ordinal));
+            var list = runtime.Instances;
+            if (list.Count == 0) { WriteNoInstance(req, name, Array.Empty<string>()); return null; }
+            if (string.IsNullOrEmpty(name))
+            {
+                if (list.Count == 1) return list[0];
+                WriteError(req, 400, "instance-name-required",
+                    "multiple bound instances; ?name= is required",
+                    "pass ?name=<instance> from availableInstances; omit ?name= only when a single instance is bound",
+                    availableInstances: list.Select(i => i.Name).ToArray());
+                return null;
+            }
+            var inst = list.FirstOrDefault(i => string.Equals(i.Name, name, StringComparison.Ordinal));
+            if (inst == null) WriteNoInstance(req, name, list.Select(i => i.Name).ToArray());
+            return inst;
         }
 
         private static (JObject args, string callId, System.Collections.Generic.List<DialogPreset> dialogs) ParseActionBody(Stream input)
@@ -202,17 +216,24 @@ namespace Puppet.Core.Web
             catch { return (null, null, null); }
         }
 
-        private static void WriteNoInstance(WebRequest req) =>
-            WriteError(req, 404, "instance-not-found", "no bound puppet instance for this request",
-                "check instance names in the discovery profile or omit ?name= for the single instance");
+        private static void WriteNoInstance(WebRequest req, string name, string[] available) =>
+            WriteError(req, 404, "instance-not-found",
+                string.IsNullOrEmpty(name)
+                    ? "no puppet instance is currently bound"
+                    : $"instance '{name}' is not bound (closed or not yet created)",
+                available.Length == 0
+                    ? "no instances are bound yet; wait for one to open, then retry"
+                    : "use ?name= from availableInstances; omit ?name= only when a single instance is bound",
+                availableInstances: available);
 
-        internal static void WriteError(WebRequest req, int status, string code, string err, string hint, int? retryAfterMs = null)
+        internal static void WriteError(WebRequest req, int status, string code, string err, string hint, int? retryAfterMs = null, string[] availableInstances = null)
         {
             var o = new System.Collections.Generic.Dictionary<string, object>
             {
                 ["ok"] = false, ["code"] = code, ["err"] = err, ["hint"] = hint
             };
             if (retryAfterMs.HasValue) o["retryAfterMs"] = retryAfterMs.Value;
+            if (availableInstances != null) o["availableInstances"] = availableInstances;
             req.Response.StatusCode = status;
             req.Response.Buffer = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(o));
             req.Response.SetJsonContent();
@@ -247,7 +268,7 @@ namespace Puppet.Core.Web
 面向用户个人 Agent 的应用操作接口。四步上手：
 
 1. **发现**：枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json` 取 {endpoint, key}；或扫描端口后 `GET /appagent/probe` 确认。
-2. **能力目录**：`GET /appagent/manifest`（Bearer key）→ actions[]（name/desc/parameters）与 state[]。
+2. **能力目录**：`GET /appagent/manifest`（Bearer key；多实例宿主必须带 `?name=`，省略时单实例默认、多实例返回 400 `instance-name-required` 并在 `availableInstances` 列出可用实例名）→ actions[]（name/desc/parameters）与 state[]。
 3. **执行操作**：`POST /appagent/actions/{name}`，body `{"args":{按名传参}, "callId":"uuid", "dialogs":[{"title":"对话框标题","answer":"No"}]}`。
    - 参数严格按名绑定：未知参数名 400、缺必填 400。
    - 实例级强制串行：busy 时返回 `409 {code:"instance-busy", retryAfterMs}`，按提示重试。
@@ -257,7 +278,8 @@ namespace Puppet.Core.Web
 4. **读状态**：`GET /appagent/state/{key}`。
 
 **错误契约**：所有错误统一 `{ok:false, code, err, hint, retryAfterMs?}`——按 hint 行动即可恢复。
-常见 code：credential-invalid / instance-busy / action-not-found / state-not-found / asset-expired / site-locked。
+常见 code：credential-invalid / instance-name-required / instance-not-found / instance-busy / action-not-found / state-not-found / asset-expired / site-locked。
+实例相关错误（instance-*）均携带 `availableInstances[]`——直接据此选名，无需读档案。
 
 **产物下载**：action 响应携带 `asset` URL 时立即 `GET`（Bearer key）下载；TTL 默认 10 分钟，过期重跑 action。
 
