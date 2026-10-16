@@ -219,6 +219,51 @@ namespace Puppet.Core.Tests
             Assert.DoesNotContain("Tag", note);
         }
 
+        /// <summary>访问/可见度解耦：非 public 成员无 [PuppetExpose] 也可读/调；[PuppetIgnore] 仍拦截。</summary>
+        [Fact]
+        public void Non_public_members_accessible_without_PuppetExpose()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "ExposeDecouple#1", AgentAccessKey = "x" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var get = MakeReq("GET", "/agent/get", "x", "name=ExposeDecouple%231&path=SecretNumber");
+                Assert.True(PuppetWebHandler.TryHandle(ref get));
+                var gj = JObject.Parse(Body(get));
+                Assert.True(gj.Value<bool>("ok"));
+                Assert.Equal(42, gj.Value<int>("value"));
+
+                var payload = Encoding.UTF8.GetBytes("[]");
+                var inv = MakeReq("POST", "/agent/invoke", "x", "name=ExposeDecouple%231&method=SecretText");
+                inv.InputStream = new MemoryStream(payload);
+                inv.ContentLength = payload.Length;
+                Assert.True(PuppetWebHandler.TryHandle(ref inv));
+                Assert.Equal("secret-ok", JObject.Parse(Body(inv)).Value<string>("result"));
+
+                var hidden = MakeReq("GET", "/agent/get", "x", "name=ExposeDecouple%231&path=HiddenNumber");
+                Assert.True(PuppetWebHandler.TryHandle(ref hidden));
+                Assert.False(JObject.Parse(Body(hidden)).Value<bool>("ok"));
+            }
+            finally { PuppetRegistry.Unregister("ExposeDecouple#1"); }
+        }
+
+        /// <summary>可见度仍解耦：无 [PuppetExpose] 的非 public 成员不进 describe 广告。</summary>
+        [Fact]
+        public void Describe_omits_non_public_members_without_PuppetExpose()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "ExposeDescribe#1" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var req = MakeReq("GET", "/agent/describe", PuppetKeyVault.GlobalKey, "name=ExposeDescribe%231");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var body = Body(req);
+                Assert.DoesNotContain("SecretNumber", body);
+                Assert.DoesNotContain("SecretText", body);
+            }
+            finally { PuppetRegistry.Unregister("ExposeDescribe#1"); }
+        }
+
         /// <summary>宿主：一个名为 ListViewItem 的类（Puppet.Core 不引用 WinForms，note 判定按类型名）。</summary>
         private sealed class ListViewHost : IPuppet
         {

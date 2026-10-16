@@ -21,5 +21,10 @@ namespace Puppet.Core.Tests
             BrokerActiveDuringInvoke = Puppet.Core.AppAgent.DialogBroker.IsActive;
             return BrokerActiveDuringInvoke;
         }
+
+        // 访问/可见度解耦锚点：[PuppetExpose] 不参与访问裁决，仅影响 /agent/describe 广告
+        private int SecretNumber => 42;
+        private string SecretText() => "secret-ok";
+        [PuppetIgnore] private int HiddenNumber => 99;
     }
 }

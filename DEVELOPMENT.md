@@ -38,11 +38,11 @@ Console 诊断扩展位于 `Puppet.Core/Extentions/ConsolePuppetExtensions.cs`�
 
 * `[PuppetIgnore]` — 不暴露给 Agent 的成员（密钥/句柄/内部状态等）
 
-* `[PuppetExpose]`（可加 `Reason = "理由"`）— 显式暴露**非 public** 成员（方法/属性/字段/事件）；public 成员默认已暴露，无需此特性
+* `[PuppetExpose]`（可加 `Reason = "理由"`）— 把非 public 成员（方法/属性/字段/事件）列入 `/agent/describe` 的广告清单（可见度/焦点，非访问授权）
 
 * `[PuppetDescription("描述")]` — 补充/覆盖描述
 
-> 成员可访问规则：`public` 默认可访问；`non-public` **方法/属性**需 `[PuppetExpose]` 才可被调用/读取。**非 public 字段**例外——`/agent/get`·`/agent/set` 可直接访问（便于访问设计器生成的控件字段），但 `/agent/describe` 仅列出带 `[PuppetExpose]` 的非 public 字段。`[PuppetIgnore]` 优先级最高，任何情况下都不暴露。
+> 成员可访问规则：`public` 优先，`non-public` 同样可访问（属性/字段/方法一致），仅 `[PuppetIgnore]` 排除——Agent 知道成员名/路径即可读/写/调用，无需标注。可见度规则与之解耦：`/agent/describe` 仅广告 `public` + `[PuppetExpose]` 成员，避免内部成员噪声。`[PuppetIgnore]` 优先级最高：既不广告、也不可访问。
 
 ### 枚举
 
@@ -176,7 +176,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
    * 两类接口都可能贯穿"开发到成果"全周期，管好各自的**时间节点**（引入、稳定、交付清理）。
 4. **操作类接口的测试路径原则**：首先不要在宿主工程内部编写/暴露专门的调试代码或方法（如 `XxxForTest()`）。尽可能只通过调用**用户工程本身已有的、面向用户的代码/方法/接口**来模拟用户操作流程，到达测试现场并进行测试。若有**确切的证据**表明此路径无法完成测试，则可考虑撰写专用于测试的“钩子”来实现调试和测试目标，直至任务达成。测试完成后，相关“钩子”应适时清理；所有相关“钩子”成员**必须标注 `[PuppetTest]`**。`PuppetTestAttribute` 仅作标记，没有具体功能代码，不改变成员的暴露或调用规则。
-5. **接口暴露原则**：Agent 可按需暴露成员（含非 public 成员加 `[PuppetExpose]`），无需用户授权。**前提**：不改变宿主原定设计行为或表现。`[PuppetExpose]` 与 `[PuppetHint]` 可长期保留供后续使用，无需清理，直至统一清理节点或用户显式要求清理。
+5. **接口暴露原则**：Agent 可直接访问成员（含非 public，唯 `[PuppetIgnore]` 排除），无需用户授权；`[PuppetExpose]` 仅用于把成员加入 `/agent/describe` 广告清单以提高可见度。**前提**：不改变宿主原定设计行为或表现。`[PuppetExpose]` 与 `[PuppetHint]` 可长期保留供后续使用，无需清理，直至统一清理节点或用户显式要求清理。
 
 ## 安全
 

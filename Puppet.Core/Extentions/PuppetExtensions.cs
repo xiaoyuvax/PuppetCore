@@ -194,8 +194,8 @@ namespace Puppet.Core.Extentions
 
         /// <summary>
         /// 解析实例方法（跳过 [PuppetIgnore]）。支持重载：优先按参数个数匹配，仍多个则取首个。
-        /// 查找规则：public 方法默认可访问；非 public 方法需带 [PuppetExpose] 特性才可访问。
-        /// 这避免了修改成员可访问性修饰符，又保留了 Agent 的测试/调用入口。
+        /// 查找规则：public 优先；无 public 同名方法时回退非 public（private/protected），仅 [PuppetIgnore] 排除。
+        /// 访问不改变成员可访问性修饰符；[PuppetExpose] 只影响 /agent/describe 的广告可见度，不参与访问裁决。
         /// </summary>
         private static MethodInfo ResolveMethod(Type type, string methodName, object[] args)
         {
@@ -211,10 +211,9 @@ namespace Puppet.Core.Extentions
             }
             else
             {
-                // 2. 非 public 需带 [PuppetExpose]（且未标 [PuppetIgnore]）
+                // 2. 非 public：仅 [PuppetIgnore] 排除（[PuppetExpose] 不参与访问裁决）
                 candidates = type.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance)
                     .Where(m => m.Name == methodName
-                        && m.GetCustomAttribute<PuppetExposeAttribute>() != null
                         && m.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
                     .ToArray();
             }
@@ -229,7 +228,7 @@ namespace Puppet.Core.Extentions
 
         /// <summary>
         /// 解析实例属性（跳过 [PuppetIgnore]）。
-        /// 查找规则：public 属性默认可访问；非 public 属性需带 [PuppetExpose] 特性才可访问。
+        /// 查找规则：public 优先；无 public 时回退非 public（未标 [PuppetIgnore] 即可访问）。
         /// </summary>
         private static PropertyInfo ResolveProperty(Type type, string propName)
         {
@@ -238,10 +237,9 @@ namespace Puppet.Core.Extentions
             if (prop != null && prop.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
                 return prop;
 
-            // 2. 非 public 需带 [PuppetExpose]（且未标 [PuppetIgnore]）
+            // 2. 非 public：仅 [PuppetIgnore] 排除
             prop = type.GetProperty(propName, BindingFlags.NonPublic | BindingFlags.Instance);
             if (prop != null
-                && prop.GetCustomAttribute<PuppetExposeAttribute>() != null
                 && prop.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
                 return prop;
 
@@ -272,12 +270,8 @@ namespace Puppet.Core.Extentions
 
         /// <summary>
         /// 解析实例成员（属性或字段，跳过 [PuppetIgnore]）。
-        /// 查找规则：
-        ///   - public 属性/字段：默认可访问
-        ///   - 非 public 属性：需带 [PuppetExpose]（属性可能有副作用逻辑，需显式授权）
-        ///   - 非 public 字段：无需 [PuppetExpose]（WinForm 设计器生成的控件如 tscboSceneID 是 private 字段，
-        ///     在 Designer.cs 中自动生成、随设计器变更重新生成，逐个标注不现实；字段是数据/控件引用，
-        ///     读写风险低于属性；密钥鉴权是真正的安全边界，[PuppetIgnore] 可显式屏蔽敏感字段）
+        /// 查找规则：public 优先；无 public 时回退非 public（属性与字段同等对待），仅 [PuppetIgnore] 排除。
+        /// 访问不改变成员可访问性修饰符；[PuppetExpose] 只影响 /agent/describe 的广告可见度，不参与访问裁决。
         /// </summary>
         private static MemberAccessor ResolveMember(Type type, string memberName)
         {
@@ -291,14 +285,13 @@ namespace Puppet.Core.Extentions
             if (field != null && field.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
                 return new MemberAccessor(field);
 
-            // 3. 非 public 属性需带 [PuppetExpose]（且未标 [PuppetIgnore]）
+            // 3. 非 public 属性：仅 [PuppetIgnore] 排除
             prop = type.GetProperty(memberName, BindingFlags.NonPublic | BindingFlags.Instance);
             if (prop != null
-                && prop.GetCustomAttribute<PuppetExposeAttribute>() != null
                 && prop.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
                 return new MemberAccessor(prop);
 
-            // 4. 非 public 字段：无需 [PuppetExpose]，仅跳过 [PuppetIgnore]（便于访问设计器生成的 private 控件字段）
+            // 4. 非 public 字段：仅 [PuppetIgnore] 排除（含设计器生成的 private 控件字段）
             field = type.GetField(memberName, BindingFlags.NonPublic | BindingFlags.Instance);
             if (field != null && field.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
                 return new MemberAccessor(field);

@@ -1,14 +1,18 @@
 namespace Puppet.Core
 {
     /// <summary>
-    /// 标记需要暴露给 Agent 的非 public 成员（方法/属性/字段/事件）。
-    /// 与 <see cref="PuppetIgnoreAttribute"/> 互斥：[PuppetIgnore] 优先级最高，标记后无论如何都不暴露。
+    /// 广告可见度标记：把非 public 成员（方法/属性/字段/事件）列入 /agent/describe 的广告清单，
+    /// 让 Agent 在“不读源码”时也能发现它。值可选填 <see cref="Reason"/> 说明用途。
+    ///
+    /// 与访问裁决<b>解耦</b>：
+    /// - <b>访问</b>：public 优先；非 public 同样可访问，唯 <see cref="PuppetIgnoreAttribute"/> 能阻止访问。
+    ///   即 Agent 只要知道成员名/路径，无需任何标记即可读/写/调用。
+    /// - <b>可见度</b>：/agent/describe 只广告 public + [PuppetExpose] 成员，避免内部成员噪声淹没信号。
+    /// - <see cref="PuppetIgnoreAttribute"/> 优先级最高：标记后既不广告、也不可访问。
     ///
     /// 设计哲学（来自架构约束）：
     /// - 不修改成员的可访问性修饰符（public/protected/private 均保持原状），保留最终产品的封装形态。
-    /// - 通过特性"声明式暴露"：开发者显式声明某个非 public 成员可被 Agent 测试/调用，语义清晰。
-    /// - 框架统一规则：Puppet 反射时，public 成员默认可访问；NonPublic 成员需带 [PuppetExpose] 才可访问。
-    /// - 跨项目复用：作为 Puppet.Core 框架的一部分，所有引用此库的项目共享同一套暴露规范。
+    /// - 访问安全边界 = 密钥（PuppetKeyVault），而非成员标注；开发期 Agent 与宿主同一信任域。
     /// </summary>
     [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Event)]
     public sealed class PuppetExposeAttribute : Attribute
