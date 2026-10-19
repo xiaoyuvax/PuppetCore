@@ -2,12 +2,12 @@
 
 ## 目的与原则
 
-- 本目录是独立 WinForms 用户宿主；以本应用真实用户需求为先，可复现证据指向共享核心问题时做最小框架修改并重跑受影响的 TestGround，不做投机性新增；仅在用户要求时提交。
+- 本目录是独立 WinForms 用户宿主；以本应用真实用户需求为先，可复现证据指向共享核心问题时做最小框架修改并重跑受影响的 TestGround，不做投机性新增。通用测试钩子、日志分离、提交纪律、编码规则见全局 AGENTS.md。
 - 保持 net10.0-windows / WinExe / UseWindowsForms / IsPackable=false，仅引用两个现有项目，不加依赖。
 - UI 和 Puppet 必须共用实际用户操作；验证编排留在内部 SelfTest，不添加可暴露测试钩子。
 - 状态通过标量只读属性观察；不用整个 Form 的 `/agent/state`。基础设施与敏感成员标记 `[PuppetIgnore]`。
 - 密钥只从非空白 `PUPPET_TESTGROUND_KEY` 读取，绝不记录；仅回环 19101，Shown 注册，关闭注销并停止服务。
-- 所有代码 UTF-8、CRLF，无代码注释。文档只记录实际验证结果。
+- 文档只记录实际验证结果。
 
 ## 验证与演进
 
