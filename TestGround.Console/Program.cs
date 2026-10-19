@@ -97,7 +97,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(selfTest ? $"Self-test failed: {ex.GetType().Name}: {ex.Message}" : "Host failed to start or run.");
+            Console.Error.WriteLine(selfTest ? $"Self-test failed: {ex}" : "Host failed to start or run.");
             exitCode = 1;
         }
         finally

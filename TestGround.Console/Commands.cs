@@ -9,17 +9,19 @@ internal static class Commands
     internal const int MaxLineLength = 512;
 
     internal static string Help => Loc.T(
-        "Commands (case-sensitive, ASCII spaces):\nadd <amount> <category> [note text]\nlist\nsummary\ndelete <id>\nhelp\nquit\n" +
+        "Commands (case-sensitive, ASCII spaces):\nadd <amount> <category> [note text]\nlist\nsummary\nbudget <amount|off>\ndelete <id>\nclear\nhelp\nquit\n" +
         "金额：数字，可含小数点后 1–2 位，范围 0.01..1000000，小数点固定为“.”；不允许正负号/千分位/指数。\n" +
         "分类：1..32 个小写 ASCII 字母、数字、- 或 _。备注：0..200 字符，不含控制/格式字符。\n" +
         "备注为行内其余内容，不支持引号/转义；首尾空白会被去除。\n" +
+        "budget 设置预算上限（off 取消）；clear 清空全部记录。\n" +
         "单条命令上限 512 字符；账本上限 10000 条。\n" +
         "--serve 在 stdin EOF 后继续运行；quit、Ctrl+C 或 Agent Stop 结束进程。\n" +
         "--self-test 需要 PUPPET_TESTGROUND_KEY，执行本地与 HTTP 检查。",
-        "Commands (case-sensitive, ASCII spaces):\nadd <amount> <category> [note text]\nlist\nsummary\ndelete <id>\nhelp\nquit\n" +
+        "Commands (case-sensitive, ASCII spaces):\nadd <amount> <category> [note text]\nlist\nsummary\nbudget <amount|off>\ndelete <id>\nclear\nhelp\nquit\n" +
         "Amount: digits[.1-2 digits], 0.01..1000000, invariant decimal point; no sign/grouping/exponent.\n" +
         "Category: 1..32 lowercase ASCII letters/digits/-/_. Note: 0..200 characters, no control/format characters.\n" +
         "Note is the rest of the line, no quoting/escaping; surrounding spaces are trimmed.\n" +
+        "budget sets an upper bound (off clears it); clear removes every entry.\n" +
         "Maximum command: 512 characters; maximum ledger: 10000 entries.\n" +
         "--serve keeps running after stdin EOF; quit, Ctrl+C or Agent Stop ends the process.\n" +
         "--self-test requires PUPPET_TESTGROUND_KEY and runs local plus HTTP checks.");
@@ -52,6 +54,22 @@ internal static class Commands
                 if (!long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id))
                     throw new ArgumentException(Loc.T("id 格式无效；请用正整数。", "Invalid id syntax; use positive digits."));
                 result = new { Deleted = ledger.Delete(id) };
+                break;
+            case "budget" when parts.Length == 2:
+                if (parts[1] == "off")
+                {
+                    if (!ledger.SetBudget(null)) throw new ArgumentException(Loc.T("预算取值无效。", "Invalid budget."));
+                    result = new { Budget = ledger.Budget };
+                    break;
+                }
+                if (parts[1].Any(c => !(c is >= '0' and <= '9' or '.')) ||
+                    !decimal.TryParse(parts[1], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var budget) ||
+                    !ledger.SetBudget(budget))
+                    throw new ArgumentException(Loc.T("预算格式无效；请用非负数字。", "Invalid budget syntax; use non-negative digits."));
+                result = new { Budget = ledger.Budget };
+                break;
+            case "clear" when parts.Length == 1:
+                result = ledger.Clear();
                 break;
             case "help" when parts.Length == 1:
                 output.WriteLine(Help);

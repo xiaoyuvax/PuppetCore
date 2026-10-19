@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using Common.Logging;
 using Puppet.Core;
+using Puppet.Core.AppAgent;
+using Puppet.Core.Extentions;
 
 namespace TestGround.Console;
 
@@ -29,12 +31,16 @@ public sealed record LedgerSummary
 {
     public int Count { get; }
     public decimal Total { get; }
+    public decimal? Budget { get; }
+    public decimal? Remaining { get; }
     public ImmutableArray<CategoryTotal> Categories { get; }
 
-    internal LedgerSummary(ImmutableArray<Expense> entries)
+    internal LedgerSummary(ImmutableArray<Expense> entries, decimal? budget)
     {
         Count = entries.Length;
         Total = entries.Sum(entry => entry.Amount);
+        Budget = budget;
+        Remaining = budget - Total;
         Categories = entries.GroupBy(entry => entry.Category, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal)
             .Select(group => new CategoryTotal(group.Key, group.Count(), group.Sum(entry => entry.Amount)))
@@ -42,12 +48,15 @@ public sealed record LedgerSummary
     }
 }
 
+[PuppetAppInfo("ExpenseLedger", Version = "1.0", Vendor = "TestGround")]
+[PuppetDescription("内存支出账本；CLI 与 Agent 共用 Add/List/Summary/Delete。")]
 public sealed class ExpenseLedger : IPuppet
 {
     [PuppetIgnore] private readonly object _gate = new();
     [PuppetIgnore] private readonly List<Expense> _entries = [];
     [PuppetIgnore] private readonly CancellationTokenSource _stop = new();
     [PuppetIgnore] private long _nextId = 1;
+    [PuppetIgnore] private decimal? _budget;
 
     [PuppetIgnore] string IPuppet.AgentAccessKey => PuppetKeyVault.GlobalKey;
     [PuppetIgnore] ILog IPuppet.AgentLog => new Common.Logging.Simple.NoOpLogger();
@@ -55,6 +64,25 @@ public sealed class ExpenseLedger : IPuppet
     [PuppetIgnore] internal CancellationToken Stopping => _stop.Token;
 
     public bool IsStopping => _stop.IsCancellationRequested;
+
+    /// <summary>演示 Console 诊断扩展（Puppet.Core.Extentions）：进程 pid/内存/uptime 只读快照</summary>
+    [PuppetHint("Tip", "ConsoleState 由 DescribeConsoleState() 生成，可观察进程级状态")]
+    public string ConsoleState => this.DescribeConsoleState();
+
+    /// <summary>当前预算上限；null = 未设置。Agent 可用 /agent/set 写入</summary>
+    [PuppetHint("Tip", "可直接 /agent/set path=Budget 设预算；null 表示不限额")]
+    public decimal? Budget
+    {
+        get { lock (_gate) return _budget; }
+        set
+        {
+            if (value is < 0 or > 1000000000m) throw new ArgumentException("Budget must be 0..1000000000.");
+            lock (_gate) _budget = value;
+        }
+    }
+
+    /// <summary>是否超预算（谓词前缀，B 面向自动排除；A 面向仍可读）</summary>
+    public bool IsOverBudget => Summary().Remaining is < 0;
 
     /// <summary>v1.0 B-only 演示：CLI 宿主的导出动作（范式外返回类型，[PuppetAction] 覆盖收录；产物走 /appagent/assets）</summary>
     [Puppet.Core.AppAgent.PuppetAction(Desc = "导出账本 CSV 文本")]
@@ -74,6 +102,7 @@ public sealed class ExpenseLedger : IPuppet
 
     /// <summary>用户核心动词（返回 Expense 复杂类型，范式外）——提炼 Agent 以 [PuppetAction] 覆盖收录进 B 面向</summary>
     [Puppet.Core.AppAgent.PuppetAction(Desc = "记一笔支出")]
+    [PuppetParam(Name = "note", Desc = "可选备注，最多 200 字符")]
     public Expense Add(decimal amount, string category, string note)
     {
         if (amount < 0.01m || amount > 1000000m || decimal.Round(amount, 2) != amount)
@@ -90,6 +119,7 @@ public sealed class ExpenseLedger : IPuppet
             var entry = new Expense(_nextId, amount, category, note.Trim());
             _nextId = checked(_nextId + 1);
             _entries.Add(entry);
+            PLog.Fwd(Puppet.Core.LogLevel.Info, $"ledger add category={category}");
             return entry;
         }
     }
@@ -99,7 +129,50 @@ public sealed class ExpenseLedger : IPuppet
         lock (_gate) return _entries.ToImmutableArray();
     }
 
-    public LedgerSummary Summary() => new(List());
+    public LedgerSummary Summary()
+    {
+        lock (_gate) return new LedgerSummary(_entries.ToImmutableArray(), _budget);
+    }
+
+    /// <summary>范式动作（bool 返回，无需标注即被 B 面向自动收录）</summary>
+    public bool SetBudget(decimal? budget)
+    {
+        if (budget is < 0 or > 1000000000m) return false;
+        lock (_gate) _budget = budget;
+        return true;
+    }
+
+    /// <summary>范式动作（OperationResult，携带面向用户的说明）</summary>
+    public OperationResult Clear()
+    {
+        lock (_gate)
+        {
+            EnsureRunning();
+            var removed = _entries.Count;
+            _entries.Clear();
+            return OperationResult.Success($"已清空 {removed} 笔记录", removed);
+        }
+    }
+
+    /// <summary>模式 B 产物：汇总 Markdown 报表（范式外返回类型，[PuppetAction] 覆盖收录）</summary>
+    [Puppet.Core.AppAgent.PuppetAction(Desc = "导出汇总 Markdown 报表")]
+    public PuppetArtifact ExportMarkdown()
+    {
+        var summary = Summary();
+        var sb = new System.Text.StringBuilder("# 账本汇总\r\n\r\n");
+        sb.Append("| 类别 | 笔数 | 金额 |\r\n|---|---|---|\r\n");
+        foreach (var c in summary.Categories)
+            sb.Append($"| {c.Category} | {c.Count} | {c.Total.ToString(System.Globalization.CultureInfo.InvariantCulture)} |\r\n");
+        sb.Append($"\r\n合计 {summary.Total.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        if (summary.Budget is { } budget) sb.Append($" / 预算 {budget.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        return new PuppetArtifact("ledger.md", "text/markdown; charset=utf-8",
+            System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+    }
+
+    /// <summary>演示 PLog：业务日志照常写宿主，同时镜像到 /agent/logs?name=Puppet.Forwarded</summary>
+    [PuppetHint("Gotcha", "Add 会经 PLog.Fwd 镜像一条日志；日志只含类别，不含金额或备注")]
+    public void LogCheckpoint(string label)
+        => PLog.Fwd(Puppet.Core.LogLevel.Info, $"ledger checkpoint {label}");
 
     public bool Delete(long id)
     {

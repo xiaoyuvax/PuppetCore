@@ -1,6 +1,6 @@
 # 小账本 Console 宿主
 
-一个可实际使用的内存支出账本，也是 Puppet.Core 的 Console 集成验证宿主。支持新增、列表、按类别汇总与删除；终端与 Agent 调用同一组业务方法。退出后数据消失，不用于真实财务留存。
+一个可实际使用的内存支出账本，也是 Puppet.Core 的 Console 集成验证宿主。支持新增、列表、按类别汇总、预算、清空与删除；终端与 Agent 调用同一组业务方法。退出后数据消失，不用于真实财务留存。
 
 ## 运行
 
@@ -18,12 +18,16 @@ add 12.50 food 午餐
 add 2.00 travel 公交
 list
 summary
+budget 100
 delete 1
+clear
 help
 quit
 ```
 
 - 命令区分大小写，仅 ASCII 空格分隔；空行忽略。
+- `budget <amount>` 设预算上限（0..1000000000），`budget off` 取消；汇总会给出 `Budget`/`Remaining`，超支时 `IsOverBudget` 为 true。
+- `clear` 清空全部记录并返回删除条数。
 - 金额语法为整数数字，可带小数点及 1..2 位小数；范围 0.01..1000000，不接受正负号、逗号、科学计数法或自动舍入。
 - 类别为 1..32 个小写 ASCII 字母、数字、`-`、`_`。
 - 备注可省略，取类别后的整段文本，不处理引号或转义；最多 200 个 UTF-16 字符，禁止控制字符及 Unicode 格式字符，首尾空白去除。
@@ -47,10 +51,14 @@ quit
 
 - `GET /agent/registry`、`GET /agent/describe?name=ExpenseLedger&format=json`
 - `POST /agent/invoke?name=ExpenseLedger&method=Add`，JSON body：`[12.50,"food","午餐"]`
-- 方法 `List`、`Summary`、`Stop` 的 body 为 `[]`；`Delete` 为 `[1]`。
-- 状态优先使用 `GET /agent/get?name=ExpenseLedger&path=IsStopping`。
+- 方法 `List`、`Summary`、`Clear`、`Stop` 的 body 为 `[]`；`Delete` 为 `[1]`；`SetBudget` 为 `[100]`（`[null]` 取消）；`LogCheckpoint` 为 `["label"]`。
+- 状态优先使用 `GET /agent/get?name=ExpenseLedger&path=IsStopping`；可读 `Budget`、`IsOverBudget`、`ConsoleState`。
+- `POST /agent/set` 可直接写 `Budget`（body `{"path":"Budget","value":7}`），`null` 表示不限额。
+- `GET /agent/hints?name=ExpenseLedger` 返回成员提示；`GET /agent/logs?name=Puppet.Forwarded` 读取镜像日志。
+- `POST /agent/lock/acquire|release` 与 `GET /agent/lock/status` 演示站点锁；`/agent/book/*` 演示 Agent 预约与心跳；`POST /mcp` 提供 MCP `tools/list`。
+- 模式 B（`PUPPET_TESTGROUND_BONLY=1`）屏蔽 `/agent/*`，仅暴露 `/appagent/*`（manifest、actions、assets、state）。
 - HTTP 成功状态不代表业务成功，必须检查响应 `ok`，成功值位于 `result`。
 - POST 必须发送 Content-Length，body 上限 4096 字节，不支持 chunked；超限返回 413。未认证按核心协议返回 404。
 - 核心 `/agent/key/refresh` 会返回新密钥，仅内存保存；旧密钥立即失效。重启仍读取启动器注入的环境密钥。
 
-业务操作不写日志。当前底层服务器仍会输出生命周期日志和 HTTP/2、HTTP/3 无 TLS 的降级提示，因此启用 Agent 后 stdout 不是纯 JSON 数据流；实际使用 HTTP/1.1。检查范围、边界与后续计划见 DEVELOPMENT.md。
+业务操作不写日志；`Add` 与 `LogCheckpoint` 会经 `PLog.Fwd` 额外镜像一条不含金额/备注的日志。当前底层服务器仍会输出生命周期日志和 HTTP/2、HTTP/3 无 TLS 的降级提示，因此启用 Agent 后 stdout 不是纯 JSON 数据流；实际使用 HTTP/1.1。检查范围、边界与后续计划见 DEVELOPMENT.md。

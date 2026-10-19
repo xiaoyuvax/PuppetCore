@@ -28,6 +28,13 @@ internal static partial class SelfTest
             Check(JsonNode.Parse(Execute(ledger, "list"))!.AsArray().Count == 3);
             Check(JsonNode.Parse(Execute(ledger, "summary"))!["Total"]!.GetValue<decimal>() == 15m);
             Check(Execute(ledger, "help").Contains("delete <id>"));
+            Check(Execute(ledger, "budget 10").Contains("\"Budget\":10"));
+            Check(ledger.Summary() is { Budget: 10m, Remaining: -5m } && ledger.IsOverBudget);
+            Check(JsonNode.Parse(Execute(ledger, "summary"))!["Remaining"]!.GetValue<decimal>() == -5m);
+            Check(!ledger.SetBudget(-1) && ledger.Budget == 10m);
+            Check(Execute(ledger, "budget off").Contains("\"Budget\":null") && ledger.Summary().Remaining is null && !ledger.IsOverBudget);
+            Reject(() => Execute(ledger, "budget -1"));
+            Reject(() => Execute(ledger, "budget 1e3"));
             foreach (var command in new[] { "add 1,20 food", "add 1e2 food", "add +1 food", "add .10 food", "add 1. food", "add 1.000 food", "add 0 food", "add -1 food", "add 1000000.01 food", "add 1 Food", "add 1", "list extra", "summary extra", "quit extra", "delete 0", "delete -1", "delete +1", "delete 9223372036854775808", "unknown", "add\t1 food", new string('x', 513) })
                 Reject(() => Execute(ledger, command));
             Reject(() => ledger.Add(1.001m, "food", ""));
@@ -45,6 +52,9 @@ internal static partial class SelfTest
             Check(snapshot.Length == 3 && summary.Count == 3 && summary.Total == 15m);
             var next = ledger.Add(1000000m, new string('a', 32), new string('x', 200));
             Check(next.Id > snapshot[^1].Id && next.Note.Length == 200);
+            var cleared = ledger.Clear();
+            Check(cleared.Ok && (int)cleared.Data! == 3 && ledger.List().IsEmpty);
+            ledger.LogCheckpoint("selftest");
             foreach (var entry in ledger.List()) Check(ledger.Delete(entry.Id));
             Check(ledger.Summary().Total == 0m);
         }
@@ -111,6 +121,31 @@ internal static partial class SelfTest
         Check(registry["Instances"]!.AsArray().Any(item => item!["InstanceName"]!.GetValue<string>() == "ExpenseLedger"));
         var describe = await client.GetStringAsync("/agent/describe?name=ExpenseLedger&format=json");
         Check(describe.Contains("Add") && describe.Contains("Summary") && !describe.Contains(key, StringComparison.Ordinal));
+        Check(describe.Contains("SetBudget") && describe.Contains("ExportMarkdown"));
+        var hints = await Get(client, "/agent/hints?name=ExpenseLedger");
+        Check(hints["notes"]!.AsArray().Any(n => n!["Category"]!.GetValue<string>() == "Gotcha"));
+        Check((await Get(client, "/agent/get?name=ExpenseLedger&paths=IsStopping,IsOverBudget"))["results"]!.AsArray().Count == 2);
+        using (var setBudget = await client.PostAsync("/agent/set", new StringContent("{\"path\":\"Budget\",\"value\":7}", Encoding.UTF8, "application/json")))
+        {
+            setBudget.EnsureSuccessStatusCode();
+            Check(JsonNode.Parse(await setBudget.Content.ReadAsStringAsync())!["ok"]!.GetValue<bool>());
+        }
+        Check(ledger.Budget == 7m && (await Get(client, "/agent/get?name=ExpenseLedger&path=IsOverBudget"))["value"]!.GetValue<bool>() == false);
+        Check((await Get(client, "/agent/get?name=ExpenseLedger&path=ConsoleState"))["value"]!.GetValue<string>().Contains("\"pid\""));
+        Check((await Get(client, "/agent/capabilities"))["SupportsAppAgent"]!.GetValue<bool>());
+        var mcp = await client.PostAsync("/mcp", new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", Encoding.UTF8, "application/json"));
+        mcp.EnsureSuccessStatusCode();
+        Check((await mcp.Content.ReadAsStringAsync()).Contains("puppet_registry"));
+        using (var acquire = await client.PostAsync("/agent/lock/acquire?agentId=selftest", new StringContent("{\"site\":\"ExpenseLedger\",\"mode\":\"Write\",\"timeoutMs\":1000}", Encoding.UTF8, "application/json")))
+            Check(JsonNode.Parse(await acquire.Content.ReadAsStringAsync())!["ok"]!.GetValue<bool>());
+        Check((await Get(client, "/agent/lock/status?site=ExpenseLedger"))["lock"]!["Mode"]!.GetValue<int>() == 2);
+        using (var release = await client.PostAsync("/agent/lock/release?agentId=selftest", new StringContent("{\"site\":\"ExpenseLedger\"}", Encoding.UTF8, "application/json")))
+            release.EnsureSuccessStatusCode();
+        using (var heartbeat = await client.PostAsync("/agent/book/heartbeat", new StringContent("{\"id\":\"selftest\",\"purpose\":\"demo\"}", Encoding.UTF8, "application/json")))
+            heartbeat.EnsureSuccessStatusCode();
+        Check((await Get(client, "/agent/book"))["agents"]!.AsArray().Any(a => a!["Id"]!.GetValue<string>() == "selftest"));
+        using (var releaseAgent = await client.PostAsync("/agent/book/release", new StringContent("{\"id\":\"selftest\"}", Encoding.UTF8, "application/json")))
+            Check(JsonNode.Parse(await releaseAgent.Content.ReadAsStringAsync())!["canShutdown"]!.GetValue<bool>());
 
         Console.WriteLine("CHECK HTTP shared user methods and validation");
         var added = await Invoke(client, "Add", "[3.25,\"food\",\"HTTP lunch\"]");

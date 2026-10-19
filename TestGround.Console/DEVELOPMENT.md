@@ -52,15 +52,17 @@ dotnet bin/Release/net10.0/TestGround.Console.dll --self-test
 
 最后一条应返回 2，前两条返回 0。端口不能被其他实例占用；--self-test 会操作本次新建的空账本并轮换本进程密钥，不能附着到生产账本。
 
-## 已实际验证（2026-09-17，Windows / .NET 10）
+## 已实际验证（2026-10-19，Windows / .NET 10）
 
-- Release 构建通过：0 warnings、0 errors；修复初次编译时 Console 命名空间/别名冲突后重新构建并自检通过。
-- --self-test 完整通过，退出 0：CLI 添加/列表/汇总/删除/帮助/quit，fr-FR 当前区域下不变金额语法，decimal 精确合计，空汇总，ID 不复用。
-- 无效金额、类别、备注、ID、参数数量和超长命令被拒绝且不改变记录；类别/备注最大长度、最大金额可接受。
+- Release 构建通过：0 warnings、0 errors。
+- --self-test 完整通过，退出 0：CLI 添加/列表/汇总/预算/清空/删除/帮助/quit，fr-FR 当前区域下不变金额语法，decimal 精确合计，空汇总，ID 不复用。
+- 无效金额、类别、备注、ID、预算、参数数量和超长命令被拒绝且不改变记录；类别/备注最大长度、最大金额可接受。
 - 行读取覆盖 CRLF/LF/CR、无末尾换行 EOF、512 字符边界、超长行丢弃后下一条恢复。
 - 并发 200 次新增/快照/汇总、并发删除、唯一 ID、历史快照稳定；10000 条容量满拒绝、删除后可再次添加，最大总额无溢出。
-- 真实 HTTP：ping、未认证/错误密钥 404、registry、describe、Add/List/Summary/Delete 与本地共享状态、无效业务输入、4097 字节 body 返回 413、密钥属性不可读取、状态与描述不包含密钥。
+- 真实 HTTP：ping、未认证/错误密钥 404、registry、describe、hints、get（多路径）、set Budget、capabilities、/mcp tools/list、Add/List/Summary/Delete 与本地共享状态、无效业务输入、4097 字节 body 返回 413、密钥属性不可读取、状态与描述不包含密钥。
+- 真实 HTTP 站点锁 acquire/status/release（`Mode` 字段）与 Agent book heartbeat/release。
 - 真实 HTTP 密钥轮换：旧密钥失效、新密钥 Stop 成功；停止后写入拒绝、finally 注销完成。
+- B-only 模式（`PUPPET_TESTGROUND_BONLY=1`）--self-test 完整通过，退出 0：profile 发现、凭据分层与 /agent/* 屏蔽、manifest、按名参数工作流、产物下载/TTL 过期重跑、资产容量上限、状态读取与错误契约。
 - 独立进程 --serve：重定向 stdin 后立即关闭输入，进程仍存活；HTTP Add/Stop 成功，15 秒内退出 0，捕获输出不含注入密钥，关闭后可重新绑定 19102。
 - 无密钥管道 CLI 和 EOF 正常退出 0；--help 退出 0；缺密钥 --self-test、未知启动参数退出 2。
 
@@ -71,5 +73,5 @@ dotnet bin/Release/net10.0/TestGround.Console.dll --self-test
 1. 先补实际终端 Ctrl+C、中文输入和异常断管场景的进程级回归；需要时再扩展自检，不添加暴露钩子。
 2. 核心 Console 扩展迁移完成后确认程序集与 Puppet.Core.Console 命名空间，仅在实际需要进程观测时采用，不提前引用旧项目。
 3. 确有跨会话需求才加用户明确选择的持久化；先定义数据格式、原子写入、失败不丢数据和迁移测试，再考虑导入导出。
-4. 确有账目管理需求再增日期筛选、预算或撤销；继续共用真实方法，每次功能附最小可运行检查。
+4. 确有账目管理需求再增日期筛选或撤销；继续共用真实方法，每次功能附最小可运行检查。
 5. 只有测量证明 10000 条上限/快照复制/线性删除不足时才增加分页或索引；网络部署需求必须另行评估服务器层 body 限制、TLS 与权限边界，不能直接改为通配地址。
