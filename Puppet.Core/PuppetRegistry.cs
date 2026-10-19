@@ -149,6 +149,15 @@ namespace Puppet.Core
             }
 
             var total = alive.Count;
+            // 稳定 ASCII slug：类型名 + 同类型序号（按名排序确定）。CLI/日志用它替代可能非 ASCII 的实例名。
+            var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var info in alive.OrderBy(i => i.TypeName, StringComparer.Ordinal).ThenBy(i => i.InstanceName, StringComparer.Ordinal))
+            {
+                ordinals.TryGetValue(info.TypeName, out var ordinal);
+                info.Slug = $"{info.TypeName}#{ordinal}";
+                ordinals[info.TypeName] = ordinal + 1;
+            }
+
             var paged = limit > 0 ? alive.Skip(offset).Take(limit).ToList() : alive.Skip(offset).ToList();
 
             return new InstanceListResult
@@ -247,6 +256,8 @@ namespace Puppet.Core
         public string InstanceName { get; set; }
         /// <summary>类型名</summary>
         public string TypeName { get; set; }
+        /// <summary>稳定 ASCII 标识（类型名#同类型序号），供 CLI/日志使用</summary>
+        public string Slug { get; set; }
         /// <summary>标签</summary>
         public string[] Tags { get; set; }
         /// <summary>是否内部实例</summary>

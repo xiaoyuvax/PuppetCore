@@ -143,7 +143,14 @@ namespace Puppet.Core.Extentions
             var type = target.GetType();
             var method = synthetic ? null : ResolveMethod(type, methodName, args);
 
-            if (!synthetic && method == null) return ToAgentJson(new { ok = false, err = "method not found" });
+            if (!synthetic && method == null)
+                return ToAgentJson(new
+                {
+                    ok = false,
+                    err = "method not found",
+                    hint = "method 必须用 C# 方法名（不是 [PuppetAction]/[PuppetDescription] 的声明名，常见如 ActXxx vs Xxx）；用 /agent/describe 或下面的 candidates 核对",
+                    candidates = SuggestMethods(type, methodName)
+                });
             if (method?.GetCustomAttribute<PuppetIgnoreAttribute>() != null)
                 return ToAgentJson(new { ok = false, err = "method not accessible" });
 
@@ -615,14 +622,55 @@ namespace Puppet.Core.Extentions
             }
         }
 
-        /// <summary>复杂对象的 note 文案：按类型给"下一步查哪里"的针对性提示。
-        /// 只按类型名判定（Puppet.Core 不引用 WinForms），新增陷阱类型在此追加分支即可。</summary>
+        /// <summary>复杂对象的 note 文案：按类型给"下一步查哪里"的针对性提示，并附本类型的可读成员名，
+        /// 省去 Agent "再探一层才知道有什么" 的往返。只按类型名判定（Puppet.Core 不引用 WinForms），新增陷阱类型在此追加分支即可。</summary>
         internal static string ComplexObjectNote(string path, object value)
         {
             // ListView 条目：.Text 是按列宽截断的显示值，真数据在 .Tag —— 实测曾因此把截断文本填进 prompt
             if (value != null && value.GetType().Name == "ListViewItem")
                 return $"ListView item; '{path}.Text' is display text (may be truncated to fit the column) — query '{path}.Tag' for the real object, '{path}.SubItems[i].Text' for cells";
-            return "complex object; query a deeper path (e.g. '" + path + ".<member>') to inspect specific members";
+            var note = "complex object; query a deeper path (e.g. '" + path + ".<member>') to inspect specific members";
+            var members = MemberNames(value?.GetType());
+            return members.Length > 0 ? note + "; readable members: " + string.Join(", ", members) : note;
+        }
+
+        /// <summary>类型可读成员名（只取名字，不调 getter，避免跨线程访问/副作用）。优先本类型声明，最多 12 个。</summary>
+        private static string[] MemberNames(Type type)
+        {
+            if (type == null) return Array.Empty<string>();
+            var names = Declared(type, true);
+            return names.Length > 0 ? names : Declared(type, false);
+
+            static string[] Declared(Type t, bool own)
+            {
+                const BindingFlags Own = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+                var flags = own ? Own : BindingFlags.Public | BindingFlags.Instance;
+                return t.GetProperties(flags)
+                    .Where(p => p.CanRead && p.GetIndexParameters().Length == 0
+                             && p.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
+                    .Select(p => p.Name)
+                    .Concat(t.GetFields(flags)
+                        .Where(f => f.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
+                        .Select(f => f.Name))
+                    .Distinct()
+                    .Take(12)
+                    .ToArray();
+            }
+        }
+
+        /// <summary>方法名未命中时的候选（声明名 ≠ C# 方法名的头号陷阱：ActXxx vs Xxx）。取含包含关系的最近 8 个。</summary>
+        private static string[] SuggestMethods(Type type, string methodName)
+        {
+            if (string.IsNullOrEmpty(methodName)) return Array.Empty<string>();
+            return type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Where(m => !m.IsSpecialName && m.GetCustomAttribute<PuppetIgnoreAttribute>() == null)
+                .Select(m => m.Name)
+                .Distinct()
+                .Where(n => n.IndexOf(methodName, StringComparison.OrdinalIgnoreCase) >= 0
+                         || methodName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderBy(n => n.Length)
+                .Take(8)
+                .ToArray();
         }
 
         /// <summary>

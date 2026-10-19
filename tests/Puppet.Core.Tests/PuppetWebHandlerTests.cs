@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using Puppet.Core.Extentions;
@@ -217,6 +218,114 @@ namespace Puppet.Core.Tests
             var note = json.Value<string>("note");
             Assert.Contains("complex object", note);
             Assert.DoesNotContain("Tag", note);
+            Assert.Contains("Value", note);   // P4：note 附本类型可读成员名，省一次探测
+        }
+
+        /// <summary>名缺（多实例）→ 400 instance-name-required + availableInstances（对齐 B 面，不再裸 404）。</summary>
+        [Fact]
+        public void Missing_name_with_multiple_instances_returns_400_with_available()
+        {
+            var a = new FakePuppet { AgentInstanceName = "MultiA#1", AgentAccessKey = "k" };
+            var b = new FakePuppet { AgentInstanceName = "MultiB#1", AgentAccessKey = "k" };
+            PuppetRegistry.Register(a);
+            PuppetRegistry.Register(b);
+            try
+            {
+                var req = MakeReq("GET", "/agent/state", PuppetKeyVault.GlobalKey);   // 无 name
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                Assert.Equal(400, req.Response.StatusCode);
+                var json = JObject.Parse(Body(req));
+                Assert.False(json.Value<bool>("ok"));
+                Assert.Equal("instance-name-required", json.Value<string>("code"));
+                var names = ((JArray)json["availableInstances"]).Select(t => t.Value<string>()).ToArray();
+                Assert.Contains("MultiA#1", names);
+                Assert.Contains("MultiB#1", names);
+            }
+            finally { PuppetRegistry.Unregister("MultiA#1"); PuppetRegistry.Unregister("MultiB#1"); }
+        }
+
+        /// <summary>名错 → 404 instance-not-found + availableInstances（可操作错误，不再裸 404）。</summary>
+        [Fact]
+        public void Unknown_instance_returns_404_with_available_list()
+        {
+            var a = new FakePuppet { AgentInstanceName = "AvailA#1", AgentAccessKey = "k" };
+            PuppetRegistry.Register(a);
+            try
+            {
+                var req = MakeReq("GET", "/agent/state", PuppetKeyVault.GlobalKey, "name=NoSuch%239");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                Assert.Equal(404, req.Response.StatusCode);
+                var json = JObject.Parse(Body(req));
+                Assert.Equal("instance-not-found", json.Value<string>("code"));
+                Assert.Contains("AvailA#1", ((JArray)json["availableInstances"]).Select(t => t.Value<string>()));
+            }
+            finally { PuppetRegistry.Unregister("AvailA#1"); }
+        }
+
+        /// <summary>未知路由 → 404 + unknown-route + routes 清单（不再裸 404，无从判断路由是否存在）。</summary>
+        [Fact]
+        public void Unknown_route_lists_known_routes()
+        {
+            var req = MakeReq("GET", "/agent/nope", PuppetKeyVault.GlobalKey);
+            Assert.True(PuppetWebHandler.TryHandle(ref req));
+            Assert.Equal(404, req.Response.StatusCode);
+            var json = JObject.Parse(Body(req));
+            Assert.Equal("unknown-route", json.Value<string>("code"));
+            Assert.NotEmpty((JArray)json["routes"]);
+        }
+
+        /// <summary>方法名未命中 → candidates 给出候选（声明名 ≠ C# 方法名的头号陷阱 ActXxx vs Xxx）。</summary>
+        [Fact]
+        public void Invoke_missing_method_suggests_candidates()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "Cand#1", AgentAccessKey = "k" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var payload = Encoding.UTF8.GetBytes("[]");
+                var req = MakeReq("POST", "/agent/invoke", "k", "name=Cand%231&method=ProbeBroker");
+                req.InputStream = new MemoryStream(payload);
+                req.ContentLength = payload.Length;
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var json = JObject.Parse(Body(req));
+                Assert.False(json.Value<bool>("ok"));
+                Assert.Contains("ProbeBrokerActive", ((JArray)json["candidates"]).Select(t => t.Value<string>()));
+            }
+            finally { PuppetRegistry.Unregister("Cand#1"); }
+        }
+
+        /// <summary>describe section=methods 只留 Methods（体积裁剪；未知 section 不裁剪）。</summary>
+        [Fact]
+        public void Describe_section_filters_output()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "Sect#1", AgentAccessKey = "k" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var req = MakeReq("GET", "/agent/describe", "k", "name=Sect%231&format=md&section=methods");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var body = Body(req);
+                Assert.Contains("## Methods", body);
+                Assert.DoesNotContain("## Properties", body);
+            }
+            finally { PuppetRegistry.Unregister("Sect#1"); }
+        }
+
+        /// <summary>registry 条目带稳定 ASCII slug（CLI/日志替代可能非 ASCII 的实例名）。</summary>
+        [Fact]
+        public void Registry_entries_expose_slug()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "Slug#1" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var req = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey);
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var json = JObject.Parse(Body(req));
+                var entry = json["Instances"].First(i => i.Value<string>("InstanceName") == "Slug#1");
+                Assert.StartsWith("FakePuppet#", entry.Value<string>("Slug"));
+            }
+            finally { PuppetRegistry.Unregister("Slug#1"); }
         }
 
         /// <summary>访问/可见度解耦：非 public 成员无 [PuppetExpose] 也可读/调；[PuppetIgnore] 仍拦截。</summary>

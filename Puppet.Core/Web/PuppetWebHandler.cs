@@ -22,6 +22,16 @@ namespace Puppet.Core.Web
         /// <summary>端点前缀</summary>
         public const string PREFIX = "/agent";
 
+        /// <summary>已知路由清单（未知路由 404 时回列，省去"是不是路由写错了？"的排查往返）</summary>
+        private static readonly string[] KnownRoutes =
+        {
+            "/mcp",
+            "GET  /agent/registry", "GET  /agent/capabilities", "GET  /agent/docs", "GET  /agent/usage",
+            "GET  /agent/hints", "GET  /agent/logs", "GET  /agent/describe", "GET  /agent/state",
+            "GET  /agent/get", "POST /agent/set", "POST /agent/invoke", "POST /agent/key/refresh",
+            "GET/POST /agent/book*", "GET/POST /agent/lock*", "/appagent/*"
+        };
+
         /// <summary>尝试处理 /agent/* 与 /mcp 请求。返回 true 表示已处理。</summary>
         public static bool TryHandle(ref WebRequest req)
         {
@@ -206,8 +216,41 @@ namespace Puppet.Core.Web
                 return true;
             }
 
-            // 以下端点需要实例 + 密钥校验
-            if (target == null || !PuppetKeyVault.Authorize(target, key))
+            // 以下端点需要实例 + 密钥校验。
+            // 与 B 面 AppAgentWebHandler 统一错误信封：名缺/名错 → 400/404 + availableInstances（Agent 据此直接选名，无需猜）；
+            // 仅密钥错保留裸 404（隐藏实例存在性，沿用旧语义）。实例名属敏感信息，只有全局密钥通过后才回列可用实例。
+            // 只有这几个路由需要实例；未知路由交给下面 default 返回 unknown-route，避免被"实例错误"劫持。
+            var needsInstance = req.Path is "/agent/describe" or "/agent/state" or "/agent/get" or "/agent/set" or "/agent/invoke";
+            if (needsInstance && target == null)
+            {
+                if (!PuppetKeyVault.AuthorizeGlobal(key)) { req.Response.SetStatus404(); return true; }
+
+                var available = PuppetRegistry.Query(includeInternal: true).Instances
+                    .Select(i => i.InstanceName).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+
+                if (string.IsNullOrEmpty(name) && available.Length == 1)
+                    target = PuppetRegistry.Resolve(available[0]); // 单实例默认（与 B 面一致）
+
+                if (target == null)
+                {
+                    if (string.IsNullOrEmpty(name) && available.Length > 1)
+                        AppAgentWebHandler.WriteError(req, 400, "instance-name-required",
+                            "multiple puppet instances are bound; ?name= is required",
+                            "pass ?name=<instance> from availableInstances; omit ?name= only when a single instance is bound",
+                            availableInstances: available);
+                    else
+                        AppAgentWebHandler.WriteError(req, 404, "instance-not-found",
+                            string.IsNullOrEmpty(name)
+                                ? "no puppet instance is currently bound"
+                                : $"instance '{name}' is not bound (closed or not yet created)",
+                            available.Length == 0
+                                ? "no instances are bound yet; wait for one to open, then retry"
+                                : "use ?name= from availableInstances; omit ?name= only when a single instance is bound",
+                            availableInstances: available);
+                    return true;
+                }
+            }
+            if (needsInstance && !PuppetKeyVault.Authorize(target, key))
             { req.Response.SetStatus404(); return true; }
 
             // 模态框代理（A 通道，2026-09-28）：与 B 通道 AppAgentExecutor 同语义——agent 触发的
@@ -222,7 +265,7 @@ namespace Puppet.Core.Web
                 case "/agent/describe" when req.Method == "GET":
                     {
                         var fmt = req.Queries["format"] == "md" ? DescribeFormat.Markdown : DescribeFormat.Json;
-                        req.Response.Buffer = Encoding.UTF8.GetBytes(target.Describe(fmt));
+                        req.Response.Buffer = Encoding.UTF8.GetBytes(target.Describe(fmt, req.Queries["section"]));
                         break;
                     }
                 case "/agent/state" when req.Method == "GET":
@@ -261,7 +304,16 @@ namespace Puppet.Core.Web
                         break;
                     }
                 default:
-                    req.Response.SetStatus404();
+                    req.Response.StatusCode = 404;
+                    req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
+                    {
+                        ok = false,
+                        code = "unknown-route",
+                        err = $"no handler for {req.Method} {req.Path}",
+                        hint = "对照 routes 列表核对路径与 method；describe/state/get 需 ?name=<instance>",
+                        routes = KnownRoutes
+                    }));
+                    req.Response.SetJsonContent();
                     return true;
             }
 

@@ -15,7 +15,7 @@ namespace Puppet.Core.Describe
         /// <summary>生成完整能力描述（JSON 或 Markdown）</summary>
         /// <param name="target">目标实例</param>
         /// <param name="format">输出格式</param>
-        public static string Describe(this IPuppet target, DescribeFormat format = DescribeFormat.Json)
+        public static string Describe(this IPuppet target, DescribeFormat format = DescribeFormat.Json, string section = null)
         {
             var type = target.GetType();
             var doc = new CapabilityDoc
@@ -34,6 +34,9 @@ namespace Puppet.Core.Describe
             // 框架合成方法（非实例成员）：由 PuppetUiActions 按注入能力追加，无能力的实例不出现
             var synthetic = PuppetUiActions.DescribeSynthetic(target);
             if (synthetic.Count > 0) doc.Methods.AddRange(synthetic);
+
+            // section 精简（methods|properties|fields|hints|state）：大实例 describe 体积可省一个数量级；未知 section 原样返回
+            if (!string.IsNullOrEmpty(section)) ApplySection(doc, section);
 
             return format == DescribeFormat.Json
                 ? Utils.ToJson(doc, compact: true)
@@ -188,6 +191,18 @@ namespace Puppet.Core.Describe
                 AgentId = attr.AgentId,
                 CreatedAt = attr.CreatedAt
             };
+
+        /// <summary>按 section 保留对应列表，其余置 null（ToMarkdown 用 ?.Count 已容忍 null）。
+        /// state = properties + fields。未知 section 不裁剪。</summary>
+        private static void ApplySection(CapabilityDoc doc, string section)
+        {
+            var s = section.ToLowerInvariant();
+            if (s is not ("methods" or "properties" or "fields" or "hints" or "state")) return;
+            if (s != "methods") doc.Methods = null;
+            if (s is not ("properties" or "state")) doc.Properties = null;
+            if (s is not ("fields" or "state")) doc.Fields = null;
+            if (s != "hints") doc.Hints = null;
+        }
 
         private static string ToMarkdown(CapabilityDoc doc)
         {
