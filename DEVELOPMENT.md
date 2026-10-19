@@ -105,7 +105,7 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | `/agent/state`       | GET  | JSONPath 查询运行时状态（`path`/`include`/`exclude`）                          |
 | `/agent/get`         | GET  | 按点分路径读单属性（`path`，如 `SelectedStateName`）——优先使用；批量用 `paths=A,B,C`（逗号分隔）一次取多个 → `{ok,results:[...]}` |
 | `/agent/set`         | POST | 按点分路径写属性，触发对应 UI 事件（body: `{path,value}`）                             |
-| `/agent/describe`    | GET  | 获取实例 schema（`format=md\|json`）                                        |
+| `/agent/describe`    | GET  | 获取实例 schema（`format=md\|json`；`section=methods\|properties\|fields\|hints\|state` 精简体积；`own=1` 只列本类型声明成员，滤掉 WinForms 基类继承属性/字段） |
 | `/agent/invoke`      | POST | 调用方法：`?name=X&method=Y`，body = JSON 数组 args\[]                        |
 | `/agent/logs`        | GET  | 读取 logger 缓冲（`name` 可不填列出全部 logger 名）                                 |
 

@@ -194,6 +194,25 @@ namespace Puppet.Core.Tests
             finally { PuppetRegistry.Unregister("SingleGet#1"); }
         }
 
+        /// <summary>空 path：返回带 hint 的 path-required（而非裸 "path is empty"），指向 /agent/state 与 ?paths=。</summary>
+        [Fact]
+        public void Get_without_path_or_paths_returns_hint()
+        {
+            var puppet = new FakePuppet { AgentInstanceName = "EmptyGet#1", AgentAccessKey = "e" };
+            PuppetRegistry.Register(puppet);
+            try
+            {
+                var req = MakeReq("GET", "/agent/get", "e", "name=EmptyGet%231");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var json = JObject.Parse(Body(req));
+                Assert.False(json.Value<bool>("ok"));
+                Assert.Equal("path-required", json.Value<string>("code"));
+                Assert.Contains("/agent/state", json.Value<string>("hint"));
+                Assert.Contains("paths=", json.Value<string>("hint"));
+            }
+            finally { PuppetRegistry.Unregister("EmptyGet#1"); }
+        }
+
         /// <summary>ListView 条目的复杂对象 note 必须点名 .Tag —— 实测曾把 .Text 的列宽截断值当真数据用。</summary>
         [Fact]
         public void Get_list_view_item_note_points_to_Tag_not_truncated_Text()

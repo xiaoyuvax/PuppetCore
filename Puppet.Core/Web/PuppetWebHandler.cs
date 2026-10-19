@@ -265,7 +265,9 @@ namespace Puppet.Core.Web
                 case "/agent/describe" when req.Method == "GET":
                     {
                         var fmt = req.Queries["format"] == "md" ? DescribeFormat.Markdown : DescribeFormat.Json;
-                        req.Response.Buffer = Encoding.UTF8.GetBytes(target.Describe(fmt, req.Queries["section"]));
+                        // own=true：只列本类型自身成员，滤掉 WinForms 基类继承属性/字段（大窗口体积可省一个量级）
+                        var own = req.Queries["own"] is "1" or "true" or "own";
+                        req.Response.Buffer = Encoding.UTF8.GetBytes(target.Describe(fmt, req.Queries["section"], own));
                         break;
                     }
                 case "/agent/state" when req.Method == "GET":
@@ -280,6 +282,18 @@ namespace Puppet.Core.Web
                     {
                         // 批量：paths=A,B,C（逗号分隔，一次往返取多个属性）；未给 paths 维持单 path 旧行为
                         var paths = SplitCsv(req.Queries["paths"]);
+                        if (paths is not { Length: > 0 } && string.IsNullOrEmpty(req.Queries["path"]))
+                        {
+                            req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
+                            {
+                                ok = false,
+                                code = "path-required",
+                                err = "path is empty",
+                                hint = "GET /agent/get 需 ?path=<属性路径>（点分，如 FileMan.CurrentScene）；批量用 ?paths=A,B；取整实例状态用 /agent/state",
+                            }));
+                            req.Response.SetJsonContent();
+                            break;
+                        }
                         if (paths is { Length: > 0 })
                         {
                             var results = new JArray(paths.Select(p => JToken.Parse(target.GetProperty(p))));
@@ -294,6 +308,18 @@ namespace Puppet.Core.Web
                     {
                         // Body: { "path": "txtName.Text", "value": <any> }
                         var parsed = ParseSetBody(req.InputStream);
+                        if (string.IsNullOrEmpty(parsed.path))
+                        {
+                            req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
+                            {
+                                ok = false,
+                                code = "path-required",
+                                err = "path is empty",
+                                hint = "POST /agent/set body 需 {\"path\":\"<属性路径>\",\"value\":<任意>}，如 {\"path\":\"txtName.Text\",\"value\":\"hi\"}",
+                            }));
+                            req.Response.SetJsonContent();
+                            break;
+                        }
                         req.Response.Buffer = Encoding.UTF8.GetBytes(target.SetProperty(parsed.path, parsed.value));
                         break;
                     }

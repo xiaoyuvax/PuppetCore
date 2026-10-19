@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Linq;
 using Newtonsoft.Json.Linq;
+using Puppet.Core.Describe;
 using Puppet.Core.WinForms;
 using Xunit;
 
@@ -48,6 +50,24 @@ namespace Puppet.Core.Tests
         }
 
         private static JObject Json(string s) => JObject.Parse(s);
+
+        [Fact]
+        public void Describe_own_filters_inherited_Control_properties()
+        {
+            using var host = new ToolbarHost();
+
+            // 默认（own=false）：含 Control 继承属性（Visible/Text…）
+            var all = Json(host.Describe()).Value<JArray>("Properties")
+                .Select(p => p.Value<string>("Name")).ToHashSet();
+            Assert.Contains("Visible", all);
+            Assert.Contains("AgentInstanceName", all);
+
+            // own=true：继承属性被滤掉，本类型声明成员保留
+            var own = Json(host.Describe(DescribeFormat.Json, null, true)).Value<JArray>("Properties")
+                .Select(p => p.Value<string>("Name")).ToHashSet();
+            Assert.DoesNotContain("Visible", own);
+            Assert.Contains("AgentInstanceName", own);
+        }
 
         [Fact]
         public void DescribeControls_Lists_ToolStripItems_WithCapabilities()

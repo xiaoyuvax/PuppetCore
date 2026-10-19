@@ -15,7 +15,10 @@ namespace Puppet.Core.Describe
         /// <summary>生成完整能力描述（JSON 或 Markdown）</summary>
         /// <param name="target">目标实例</param>
         /// <param name="format">输出格式</param>
-        public static string Describe(this IPuppet target, DescribeFormat format = DescribeFormat.Json, string section = null)
+        /// <param name="own">仅列本类型声明的成员（加 DeclaredOnly），滤掉 WinForms 基类继承的
+        /// Control/Form 属性/字段（AcceptButton、AccessibleRole…）——大窗口实例 describe 体积可再省一个量级。
+        /// 方法本就用 DeclaredOnly，不受影响；状态读写（state/get/set）仍可达继承成员，仅广告面收窄。</param>
+        public static string Describe(this IPuppet target, DescribeFormat format = DescribeFormat.Json, string section = null, bool own = false)
         {
             var type = target.GetType();
             var doc = new CapabilityDoc
@@ -25,9 +28,9 @@ namespace Puppet.Core.Describe
                 AssemblyName = type.Assembly.GetName().Name,
                 Summary = XmlDocExtractor.GetSummary(type, out var typeSource),
                 SummarySource = typeSource,
-                Properties = EnumerateProperties(type),
+                Properties = EnumerateProperties(type, own),
                 Methods = EnumerateMethods(type),
-                Fields = EnumerateFields(type),
+                Fields = EnumerateFields(type, own),
                 Hints = EnumerateHints(type)
             };
 
@@ -43,11 +46,12 @@ namespace Puppet.Core.Describe
                 : ToMarkdown(doc);
         }
 
-        private static List<PropertyDesc> EnumerateProperties(Type type)
+        private static List<PropertyDesc> EnumerateProperties(Type type, bool own)
         {
-            var publicProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            var ownFlag = own ? BindingFlags.DeclaredOnly : BindingFlags.Default;
+            var publicProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | ownFlag)
                 .Where(p => p.GetCustomAttribute<PuppetIgnoreAttribute>() == null);
-            var exposedProps = type.GetProperties(BindingFlags.NonPublic | BindingFlags.Instance)
+            var exposedProps = type.GetProperties(BindingFlags.NonPublic | BindingFlags.Instance | ownFlag)
                 .Where(p => p.GetCustomAttribute<PuppetExposeAttribute>() != null
                          && p.GetCustomAttribute<PuppetIgnoreAttribute>() == null);
             return publicProps.Concat(exposedProps).Select(p =>
@@ -100,11 +104,12 @@ namespace Puppet.Core.Describe
                 }).ToList();
         }
 
-        private static List<FieldDesc> EnumerateFields(Type type)
+        private static List<FieldDesc> EnumerateFields(Type type, bool own)
         {
-            var publicFields = type.GetFields(BindingFlags.Public | BindingFlags.Instance)
+            var ownFlag = own ? BindingFlags.DeclaredOnly : BindingFlags.Default;
+            var publicFields = type.GetFields(BindingFlags.Public | BindingFlags.Instance | ownFlag)
                 .Where(f => f.GetCustomAttribute<PuppetIgnoreAttribute>() == null);
-            var exposedFields = type.GetFields(BindingFlags.NonPublic | BindingFlags.Instance)
+            var exposedFields = type.GetFields(BindingFlags.NonPublic | BindingFlags.Instance | ownFlag)
                 .Where(f => f.GetCustomAttribute<PuppetExposeAttribute>() != null
                          && f.GetCustomAttribute<PuppetIgnoreAttribute>() == null);
             return publicFields.Concat(exposedFields).Select(f =>
