@@ -560,6 +560,7 @@ namespace Puppet.Core.Extentions
             object navResult = null;
             string navError = null;
             string navType = null;
+            Type navErrorType = null;
 
             // 导航函数：支持属性、字段和索引器（如 scenes[0].nodes[3].enabled），需在 UI 线程执行避免跨线程访问
             void DoNavigate()
@@ -572,6 +573,7 @@ namespace Puppet.Core.Extentions
                     if (err != null)
                     {
                         navError = err;
+                        navErrorType = type;
                         return;
                     }
                     current = val;
@@ -596,7 +598,16 @@ namespace Puppet.Core.Extentions
                     return ToAgentJson(new { ok = true, path = path, value = synValue, type = synType });
 
                 if (navError != null)
+                {
+                    // 属性名写错时直接给候选成员名，省掉 Agent「改一次名再试一轮」的往返（与 /agent/invoke 的 candidates 对齐）
+                    if (navErrorType != null && navError.Contains("not found", StringComparison.Ordinal))
+                    {
+                        var candidates = MemberNames(navErrorType);
+                        if (candidates.Length > 0)
+                            return ToAgentJson(new { ok = false, err = navError, candidates });
+                    }
                     return ToAgentJson(new { ok = false, err = navError });
+                }
 
                 // null 值直接返回（Agent 可据此区分"未加载"与"已加载"）
                 if (navResult == null)

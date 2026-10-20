@@ -103,9 +103,9 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | -------------------- | ---- | --------------------------------------------------------------------- |
 | `/agent/registry`    | GET  | 条件查询实例列表（仅全局密钥；type/tags/includeInternal/activeWithin/keyword/offset/limit） |
 | `/agent/state`       | GET  | JSONPath 查询运行时状态（`path`/`include`/`exclude`）                          |
-| `/agent/get`         | GET  | 按点分路径读单属性（`path`，如 `SelectedStateName`）——优先使用；批量用 `paths=A,B,C`（逗号分隔）一次取多个 → `{ok,results:[...]}` |
+| `/agent/get`         | GET  | 按点分路径读单属性（`path`，如 `SelectedStateName`）——优先使用；批量用 `paths=A,B,C`（逗号分隔）一次取多个 → `{ok,results:[...]}`；属性名写错时返回 `candidates`（该类型的可读成员名，最多 12 个），直接据此纠正 |
 | `/agent/set`         | POST | 按点分路径写属性，触发对应 UI 事件（body: `{path,value}`）                             |
-| `/agent/describe`    | GET  | 获取实例 schema（`format=md\|json`；`section=methods\|properties\|fields\|hints\|state` 精简体积；`own=1` 只列本类型声明成员，滤掉 WinForms 基类继承属性/字段） |
+| `/agent/describe`    | GET  | 获取实例 schema（`format=md\|json`；`section=methods\|properties\|fields\|hints\|state` 精简体积；`own=1` 只列本类型声明成员，滤掉 WinForms 基类继承属性/字段；`values=1` 为属性附加当前值，仅简单类型，读失败留空） |
 | `/agent/invoke`      | POST | 调用方法：`?name=X&method=Y`，body = JSON 数组 args\[]                        |
 | `/agent/logs`        | GET  | 读取 logger 缓冲（`name` 可不填列出全部 logger 名）                                 |
 

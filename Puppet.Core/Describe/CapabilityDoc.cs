@@ -40,6 +40,9 @@ namespace Puppet.Core.Describe
         public bool CanRead { get; set; }
         /// <summary>是否可写</summary>
         public bool CanWrite { get; set; }
+        /// <summary>当前值（仅 describe?values=1 且为简单类型时填充；读失败/复杂对象为 null）</summary>
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public object Value { get; set; }
     }
 
     /// <summary>方法描述</summary>

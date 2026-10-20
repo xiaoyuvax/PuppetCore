@@ -267,7 +267,9 @@ namespace Puppet.Core.Web
                         var fmt = req.Queries["format"] == "md" ? DescribeFormat.Markdown : DescribeFormat.Json;
                         // own=true：只列本类型自身成员，滤掉 WinForms 基类继承属性/字段（大窗口体积可省一个量级）
                         var own = req.Queries["own"] is "1" or "true" or "own";
-                        req.Response.Buffer = Encoding.UTF8.GetBytes(target.Describe(fmt, req.Queries["section"], own));
+                        // values=1：属性附带当前值（仅简单类型），一次拿到"有哪些状态 + 现值"
+                        var values = req.Queries["values"] is "1" or "true" or "values";
+                        req.Response.Buffer = Encoding.UTF8.GetBytes(target.Describe(fmt, req.Queries["section"], own, values));
                         break;
                     }
                 case "/agent/state" when req.Method == "GET":

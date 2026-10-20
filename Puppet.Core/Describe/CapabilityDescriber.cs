@@ -18,7 +18,9 @@ namespace Puppet.Core.Describe
         /// <param name="own">仅列本类型声明的成员（加 DeclaredOnly），滤掉 WinForms 基类继承的
         /// Control/Form 属性/字段（AcceptButton、AccessibleRole…）——大窗口实例 describe 体积可再省一个量级。
         /// 方法本就用 DeclaredOnly，不受影响；状态读写（state/get/set）仍可达继承成员，仅广告面收窄。</param>
-        public static string Describe(this IPuppet target, DescribeFormat format = DescribeFormat.Json, string section = null, bool own = false)
+        /// <param name="values">为属性附加当前值（仅简单类型，读失败留空）。让 Agent 一次拿到"有哪些状态 + 现值"，
+        /// 省掉"猜属性名 → get → 404"的往返；复杂对象不填充（跨线程/序列化风险）。</param>
+        public static string Describe(this IPuppet target, DescribeFormat format = DescribeFormat.Json, string section = null, bool own = false, bool values = false)
         {
             var type = target.GetType();
             var doc = new CapabilityDoc
@@ -40,10 +42,42 @@ namespace Puppet.Core.Describe
 
             // section 精简（methods|properties|fields|hints|state）：大实例 describe 体积可省一个数量级；未知 section 原样返回
             if (!string.IsNullOrEmpty(section)) ApplySection(doc, section);
+            if (values) FillPropertyValues(target, type, doc.Properties);
 
             return format == DescribeFormat.Json
                 ? Utils.ToJson(doc, compact: true)
                 : ToMarkdown(doc);
+        }
+
+        /// <summary>为属性描述填充当前值：只读 + 简单类型 + 限 80 个；单个属性异常不影响整体。</summary>
+        private static void FillPropertyValues(IPuppet target, Type type, List<PropertyDesc> props)
+        {
+            foreach (var p in props.Where(x => x.CanRead).Take(80))
+            {
+                try
+                {
+                    var pi = type.GetProperty(p.Name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (pi == null || pi.GetIndexParameters().Length > 0 || !IsSimple(pi.PropertyType)) continue;
+                    p.Value = PuppetUiContext.ShouldSwitch()
+                        ? PuppetUiContext.Send(() => pi.GetValue(target))
+                        : pi.GetValue(target);
+                }
+                catch
+                {
+                    // 属性 getter 可能依赖 UI 状态/已释放资源：读失败留空即可，describe 不应因此失败
+                }
+            }
+        }
+
+        private static bool IsSimple(Type type)
+        {
+            if (type == null) return false;
+            if (type.IsPrimitive || type.IsEnum) return true;
+            if (type == typeof(string) || type == typeof(decimal) || type == typeof(char)) return true;
+            if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan)) return true;
+            if (type == typeof(Guid) || type == typeof(Uri)) return true;
+            var underlying = Nullable.GetUnderlyingType(type);
+            return underlying != null && IsSimple(underlying);
         }
 
         private static List<PropertyDesc> EnumerateProperties(Type type, bool own)
