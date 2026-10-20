@@ -611,6 +611,40 @@ $key = (Get-Content "$env:LOCALAPPDATA\Puppet.AppAgents\<app>.<pid>.json" -Raw |
 
 范式扫描 + `[PuppetAction]` 只覆盖"**方法层**"，**没有任何编译期/CI 断言把"UI 控件 ↔ action"绑定起来**。所以"完整 actionize"目前是**目标**而非**已验证状态**。要真正闭环，需引入完备性门禁：遍历控件树断言"每个有 `Text` 的叶子控件，要么有 `Click`，要么有同名/对应 action"，并纳入 DEBUG 自检或 CI。
 
+## ActionHub：进程内调用面（A/B 两面共用一条瀑布）
+
+`ProcessWebRequest(WebRequest)` 是 Puppet 的**能力瀑布/路由内核**，而不是 HTTP 服务器的附属物。WebEngine（Kestrel / NHttp）只是它的一个 transport adapter：把 socket 包成 `WebRequest`、调用瀑布、再把 `WebResponse.Buffer` 写回连接。因此能力层天然有两个入口，**同一条瀑布、同一套语义**：
+
+| 入口 | 形态 | 适用 |
+|------|------|------|
+| 内部 `server.Hub` | 直接调用 `ProcessWebRequest`，无 socket | 内嵌 Agent、宿主业务服务、单测 |
+| 外部 `WebEngine` | HTTP → `ProcessWebRequest` | 用户 Agent、CLI、跨进程 |
+
+```csharp
+var server = new PuppetWebServer().UseFormControls().UseAppAgentWithUiText(o => o.ProductName = "…");
+var hub = server.Hub;   // 不需要 Start / Bind
+
+var reg = await hub.GetAsync("/agent/registry");                              // A 面
+var man = await hub.GetAsync("/appagent/manifest", new { name = "MainForm" }); // B 面
+var run = await hub.ActionAsync("GenerateImageAction", "ImageGen#1", new { prompt = "…" });
+```
+
+`HubResponse` 与 HTTP 响应逐字同构：`Status`（200/400/401/404/409/500）、`Body`（JSON）、`ContentType`。
+
+**语义保证（因为它就是同一条瀑布）**
+
+- **鉴权照常**：Hub 自动注入本地凭证（`/appagent/*` 用进程内档案 key，其余用全局 key），不是"本地免鉴权"——显式传错 `bearerKey` 仍返回 401 `credential-invalid`。
+- **无第二套执行器**：实例解析、按名严格绑定、实例级串行（busy 409）、`Task` 解包、产物提取全部由 `AppAgentExecutor` 完成。
+- **模态框语义不变**：`DialogBroker` 预答机制照常；未预置的对话框按安全默认（Cancel / No）自动应答。**本地调用不等于跳过用户确认。**
+- **action 名区分大小写**：`/appagent/actions/{Name}` 从 `PathCaseSensitive` 取，Hub 原样传 path，调用方不要自行小写化。
+- **审计可分**：内部调用带 `X-Puppet-Hub: 1` 请求头，`/agent/usage` 中单独计为 `hub-local`（该头不参与鉴权，外部伪造只影响统计标签）。
+
+**不依赖 `Start`/`Bind`**：实例绑定与本地凭证在 `AppAgentRuntime` 构造时即就绪。因此端口被占、回环被策略禁用、档案文件不可读时，内嵌 Agent 仍可用；`Stop` 之后也能继续用 Hub 做收尾动作。`InstanceNames` 的启动快照语义不变（运行期新建窗体仍需 `DynamicBinding = true`）。
+
+**必须 async**：`AppAgentExecutor` 对 `Task` 返回值同步等待，在 UI 线程同步调用 Hub 会死锁；`PuppetHub` 内部统一切到线程池执行，调用方 `await` 即可。
+
+**边界**：Hub 引用 = 进程内全权限，不要暴露给脚本/插件宿主；外部 Agent 仍走 HTTP——跨进程才是真实的安全边界。
+
 ## TestGround 参考工程（仅源码引用模式可用）
 
 > ⚠️ **NuGet 包部署模式下不可用**：TestGround 项目是源码级参考实现，**不随 NuGet 包分发**。NuGet 模式下 Agent 无法直接阅读这些项目源码。

@@ -74,6 +74,35 @@ namespace Puppet.Core.AppAgent
             Options = options ?? new AppAgentOptions();
             Assets = new AppAgentAssetStore(Options);
             Executor = new AppAgentExecutor(this);
+
+            // 实例绑定在构造时即就绪：本地 Hub（进程内直调 ProcessWebRequest）不依赖 Start/Bind，
+            // 也不读档案文件。DynamicBinding 同样在此订阅，运行期新注册的实例无需等 Start。
+            SubscribeDynamicBinding();
+            SnapshotInstances();
+        }
+
+        /// <summary>按 Options.InstanceNames 快照已有实例（构造与 Bind 各调一次，按名去重幂等）。</summary>
+        private void SnapshotInstances()
+        {
+            var names = Options.InstanceNames;
+            var candidates = PuppetRegistry.Query(includeInternal: true).Instances;
+            IEnumerable<IPuppet> targets = names == null
+                ? PuppetRegistry.AllAlive()
+                : candidates.Where(i => names.Contains(i.InstanceName))
+                            .Select(i => PuppetRegistry.Resolve(i.InstanceName))
+                            .Where(p => p != null);
+
+            foreach (var p in targets.ToList()) AddInstance(p);
+        }
+
+        private void SubscribeDynamicBinding()
+        {
+            if (!Options.DynamicBinding) return;
+            // 先退订再订阅：Stop/Start 或重复 Bind 不会重复挂接
+            PuppetRegistry.InstanceRegistered -= OnInstanceRegistered;
+            PuppetRegistry.InstanceUnregistered -= OnInstanceUnregistered;
+            PuppetRegistry.InstanceRegistered += OnInstanceRegistered;
+            PuppetRegistry.InstanceUnregistered += OnInstanceUnregistered;
         }
 
         /// <summary>发现档案文件路径（宿主正常退出清理后，测试需自行验证；异常退出由 SweepStale 兑底）。</summary>
@@ -86,33 +115,18 @@ namespace Puppet.Core.AppAgent
             return FixedTimeEquals(requestKey, _profileKey);
         }
 
-        private string _profileKey;
+        private readonly string _profileKey = Guid.NewGuid().ToString("N");
+
+        /// <summary>进程内调用凭证（本地 Hub 自动注入；不落盘，档案文件只在 Bind 时写）。</summary>
+        internal string LocalKey => _profileKey;
 
         /// <summary>绑定实例并写档案（发现 L0）。port 用于档案 endpoint 记录。
         /// 模式 A/C（外部 Web 服务器）在 Start 成功后由宿主显式调用；模式 B 由 PuppetWebServer.Start 自动调用。
         /// DynamicBinding 开启时先订阅注册事件再取快照（消除订阅与快照间的窗口；重叠实例按名去重）。</summary>
         public void Bind(int port)
         {
-            _profileKey = Guid.NewGuid().ToString("N");
-
-            if (Options.DynamicBinding)
-            {
-                // 先退订再订阅：Stop/Start 重启会再次 Bind，防同一 handler 重复挂接
-                PuppetRegistry.InstanceRegistered -= OnInstanceRegistered;
-                PuppetRegistry.InstanceUnregistered -= OnInstanceUnregistered;
-                PuppetRegistry.InstanceRegistered += OnInstanceRegistered;
-                PuppetRegistry.InstanceUnregistered += OnInstanceUnregistered;
-            }
-
-            var names = Options.InstanceNames;
-            var candidates = PuppetRegistry.Query(includeInternal: true).Instances;
-            IEnumerable<IPuppet> targets = names == null
-                ? PuppetRegistry.AllAlive()
-                : candidates.Where(i => names.Contains(i.InstanceName))
-                            .Select(i => PuppetRegistry.Resolve(i.InstanceName))
-                            .Where(p => p != null);
-
-            foreach (var p in targets.ToList()) AddInstance(p);
+            SubscribeDynamicBinding();
+            SnapshotInstances();
 
             AppAgentProfileStore.SweepStale();
             _profileFile = AppAgentProfileStore.Write(Options.ProductName, port, _profileKey);

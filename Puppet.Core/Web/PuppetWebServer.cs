@@ -69,9 +69,25 @@ namespace Puppet.Core.Web
             return this;
         }
 
+        /// <summary>
+        /// 进程内能力入口（ActionHub）：直接调用 <see cref="ProcessWebRequest(WebRequest)"/> 瀑布，
+        /// 不经过 WebEngine。A 面（/agent/*）与 B 面（/appagent/*）与外部 HTTP 完全同一条路径。
+        /// 无需 Start/Bind，也不依赖端口、回环网络或本地档案文件。
+        /// </summary>
+        public Hub.PuppetHub Hub => _hub ??= new Hub.PuppetHub(this);
+
+        private Hub.PuppetHub _hub;
+
+        /// <summary>面向 B 运行时（UseAppAgent 时创建；null = 未启用）</summary>
+        internal AppAgent.AppAgentRuntime AppAgent => _appAgentRuntime;
+
         /// <inheritdoc/>
         public override WebResponse ProcessWebRequest(WebRequest req)
         {
+            // 内部 Hub 调用单独计数（不影响现有 endpoint 统计口径）
+            if (req.Headers?[global::Puppet.Core.Hub.PuppetHub.LocalHeader] == "1")
+                Usage.PuppetUsage.Track("hub-local", $"{req.Method} {req.Path}");
+
             base.ProcessWebRequest(req);
 
             if (req.Path == "/ping") { req.Response.SetStatus200(); return req.Response; }

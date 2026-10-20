@@ -171,6 +171,26 @@ B 面向的能力强弱取决于项目里"被 actionize 的动作"有多少，�
 * **A 面向（自调试闭环）已成熟**：状态可读到单属性粒度（`/agent/get?path=a.b.c`），`invoke` 会阻塞等待 `Task`，跨线程自动切回 UI 线程，实测可稳定驱动完整业务流程。
 * **B 面向（代理用户操作）仍在探索**：主要瓶颈是**动作覆盖度**——Actionize 范式只收录"已写成 `public` + 成败返回"的方法，而大量用户操作仍埋在私有事件处理器里，且目前**没有完备性门禁**把"UI 控件 ↔ 动作"绑定起来。如何系统地找出并补齐这些缺口，见 [DEVELOPMENT.md](DEVELOPMENT.md) 的《Actionize 覆盖度扫描》。
 
+### ActionHub：进程内调用面（A/B 两面共用一条瀑布）
+
+`ProcessWebRequest` 是 Puppet 的**能力瀑布**；WebEngine 只是它的 transport adapter。能力因此天然有两个入口，**同一条瀑布、同一套语义**：
+
+| 入口 | 形态 | 适用 |
+| ---- | ---- | ---- |
+| `server.Hub` | 直接调用瀑布（无 socket） | 内嵌 Agent、宿主业务服务、单测 |
+| `WebEngine` | HTTP → 瀑布 | 用户 Agent、CLI、跨进程 |
+
+```csharp
+var server = new PuppetWebServer().UseAppAgent(o => o.ProductName = "小步看板");
+var hub = server.Hub;                                                              // 无需 Start / Bind
+
+var registry = await hub.GetAsync("/agent/registry");                               // A 面
+var manifest = await hub.GetAsync("/appagent/manifest", new { name = "MainForm" }); // B 面
+var result   = await hub.ActionAsync("GenerateImageAction", "ImageGen#1", new { prompt = "…" });
+```
+
+鉴权、实例解析、按名绑定、实例级串行、DialogBroker 预答与审计全部复用同一条路径，**不存在第二套执行器**；本地凭证自动注入（并非免鉴权），未预置的模态框仍按安全默认自动应答。它不依赖端口、回环网络或档案文件——服务器起不来时，内嵌 Agent 依然可用。
+
 ### 应用内截图
 
 Puppet.Core 提供**应用内截图**能力——**不走 OS/UI Automation 截屏**，而是由应用自身渲染像素并返回 PNG，全程不拦截输入、不遮挡界面、多显示器下也不产生整屏大图，符合"互不共享操作流程"原则。
