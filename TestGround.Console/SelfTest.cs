@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Runtime.CompilerServices;
+using Puppet.Core;
 
 namespace TestGround.Console;
 
@@ -27,7 +28,20 @@ internal static partial class SelfTest
             Check(snapshot[0].Note == "lunch with friends" && snapshot[1].Note == "");
             Check(JsonNode.Parse(Execute(ledger, "list"))!.AsArray().Count == 3);
             Check(JsonNode.Parse(Execute(ledger, "summary"))!["Total"]!.GetValue<decimal>() == 15m);
-            Check(Execute(ledger, "help").Contains("delete <id>"));
+            Check(Execute(ledger, "help").Contains("delete <id>") && Execute(ledger, "help").Contains("presence"));
+            const string presenceAgent = "selftest-presence";
+            AgentBook.Heartbeat(presenceAgent, "verify presence", "summary", 0, "ExpenseLedger", "Summary", LockMode.Read, "selftest note", "selftest help");
+            try
+            {
+                var presence = JsonNode.Parse(Execute(ledger, "presence"))!;
+                Check(presence["Puppets"]!.AsArray().Any(p => p!["InstanceName"]!.GetValue<string>() == "ExpenseLedger"));
+                Check(presence["Agents"]!.AsArray().Any(a => a!["Id"]!.GetValue<string>() == presenceAgent
+                    && a["Status"]!.GetValue<string>() == "idle"
+                    && a["Note"]!.GetValue<string>() == "selftest note"
+                    && a["SeeksHelp"]!.GetValue<string>() == "selftest help"));
+                Check(Commands.PresenceSummary().Contains("selftest help", StringComparison.Ordinal));
+            }
+            finally { AgentBook.Release(presenceAgent); }
             Check(Execute(ledger, "budget 10").Contains("\"Budget\":10"));
             Check(ledger.Summary() is { Budget: 10m, Remaining: -5m } && ledger.IsOverBudget);
             Check(JsonNode.Parse(Execute(ledger, "summary"))!["Remaining"]!.GetValue<decimal>() == -5m);

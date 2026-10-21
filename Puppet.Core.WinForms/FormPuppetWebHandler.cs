@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using Wima.Web;
 
@@ -61,6 +62,11 @@ namespace Puppet.Core.WinForms
             }
 
             req.Response.SetJsonContent();
+            var contentType = req.Response.Headers?.Get("Content-Type");
+            if (!string.IsNullOrEmpty(contentType)
+                && contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)
+                && contentType.IndexOf("charset", StringComparison.OrdinalIgnoreCase) < 0)
+                req.Response.Headers.Set("Content-Type", contentType + "; charset=utf-8");
             return true;
         }
 

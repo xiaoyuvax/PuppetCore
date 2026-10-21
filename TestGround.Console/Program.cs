@@ -130,25 +130,55 @@ internal static class Program
     private static async Task RunCommands(ExpenseLedger ledger, bool serve)
     {
         if (!Console.IsInputRedirected) Console.WriteLine(Commands.Help);
-        while (!ledger.IsStopping)
+        using var watchStop = CancellationTokenSource.CreateLinkedTokenSource(ledger.Stopping);
+        var watcher = WatchPresenceAsync(watchStop.Token);
+        try
         {
-            try
+            while (!ledger.IsStopping)
             {
-                if (!Console.IsInputRedirected) Console.Write("> ");
-                var line = await Task.Run(() => Commands.ReadLine(Console.In)).WaitAsync(ledger.Stopping);
-                if (line is null)
+                try
                 {
-                    if (serve) await Task.Delay(Timeout.Infinite, ledger.Stopping);
-                    else ledger.Stop();
-                    break;
+                    if (!Console.IsInputRedirected) Console.Write("> ");
+                    var line = await Task.Run(() => Commands.ReadLine(Console.In)).WaitAsync(ledger.Stopping);
+                    if (line is null)
+                    {
+                        if (serve) await Task.Delay(Timeout.Infinite, ledger.Stopping);
+                        else ledger.Stop();
+                        break;
+                    }
+                    Commands.Execute(ledger, line, Console.Out);
                 }
-                Commands.Execute(ledger, line, Console.Out);
-            }
-            catch (OperationCanceledException) when (ledger.IsStopping) { break; }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-            {
-                Console.Error.WriteLine(ex.Message);
+                catch (OperationCanceledException) when (ledger.IsStopping) { break; }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+                {
+                    Console.Error.WriteLine(ex.Message);
+                }
             }
         }
+        finally
+        {
+            watchStop.Cancel();
+            await watcher;
+        }
+    }
+
+    private static async Task WatchPresenceAsync(CancellationToken stop)
+    {
+        if (Console.IsInputRedirected) return;
+        var last = "";
+        try
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                var current = Commands.PresenceSummary();
+                if (current != last)
+                {
+                    last = current;
+                    Console.Error.WriteLine(Environment.NewLine + "[puppet] " + current);
+                }
+                await Task.Delay(2000, stop);
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 }

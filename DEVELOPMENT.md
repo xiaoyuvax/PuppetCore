@@ -97,6 +97,8 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 请求头一律：`Authorization: Bearer <key>`
 
+JSON 响应统一带 `Content-Type: application/json; charset=utf-8`（A 面 `/agent/*`、B 面 `/appagent/*`、`/mcp` 与 WinForms `/agent/control` 一致），客户端可直接按 UTF-8 解码。
+
 ### 核心端点（需实例密钥或全局密钥）
 
 | 端点                   | 方法   | 说明                                                                    |
@@ -121,12 +123,12 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 
 | 端点                       | 方法   | 说明                                                                    |
 | ----------------------- | ---- | --------------------------------------------------------------------- |
-| `/agent/book`           | GET  | 查询所有 Agent 状态（`includeStale=true` 包含超时未心跳者）                       |
-| `/agent/book/heartbeat` | POST | 显式心跳，Body: `{id, purpose?, op?, waitEst?, site?, lockMode?}`       |
+| `/agent/book`           | GET  | 查询所有 Agent 状态（`includeStale=true` 包含超时未心跳者）；响应另含 `helpLog`（最近 20 条去重求助） |
+| `/agent/book/heartbeat` | POST | 显式心跳，Body: `{id, purpose?, op?, waitEst?, site?, lockMode?, note?, help?, helpTo?}` |
 | `/agent/book/release`   | POST | 正常关闭前检查/等待，Body: `{id, waitForOthers?, timeoutSec?}` → `{canShutdown}` |
 | `/agent/lock/acquire`   | POST | 获取建议性锁，Body: `{site, mode:"Read|Write", timeoutMs?, agentId?}`    |
 | `/agent/lock/release`   | POST | 释放锁，Body: `{site, agentId?}`                                         |
-| `/agent/lock/status`    | GET  | 查询锁状态，`?site=*` 返回全部，`?site=Form1.btnSave` 返回单个                     |
+| `/agent/lock/status`    | GET  | 查询锁状态，`?site=*` 返回全部，`?site=Form1.btnSave` 返回单个；每条含自然语言 `lock`，单个响应另含 `lockText`（数字 `Mode` 仅向后兼容） |
 
 ### 运行时元信息端点
 
@@ -157,8 +159,16 @@ new PuppetWebServer().Start("0.0.0.0:9090");
 | `agentWaitEst` | int | 预估还需等待秒数 |
 | `site` | string | 操作站点路径（如 `"Form1.txtName.Text"`、`"Form1.*"`、`"*"` 整实例） |
 | `lockMode` | string | `"Read"`/`"Write"`/`"None"` |
+| `agentNote` | string | 给其他 Agent 的注意事项（如「不要关闭宿主」「不要操作某 site」）；`agentNote=`（空值）清除 |
+| `agentHelp` | string | 向其他 Agent 求助/邀请协作（自由文本，如「需要人核对保存对话框」）；`agentHelp=`（空值）清除 |
+| `agentHelpTo` | string | 求助目标 Agent Id；省略 = 保留原目标，`agentHelpTo=`（空值）= 广播。仅与 `agentHelp` 一起生效 |
+| `agentDone` | bool | `true` 表示本次是最后一次调用，响应后立即将从 AgentBook 移除（`1` 亦兼容） |
 
 > 每次调用自动更新 AgentBook 心跳，无需额外请求。
+>
+> **在场同伴自动提示**：只要 AgentBook 里存在其他 Agent，`/agent/*`（以及 `/appagent/*`）的每个响应都会附带同伴摘要（JSON 对象响应加 `peers` / `peersHint` 字段；Markdown/文本响应追加同内容区块）。每个同伴含：`id`、`instance`、`site`、`doing`、`purpose`、`idleSeconds`、`lastActive`、`estimatedWaitSeconds`、`shuttingDown`、`lock`、`note`、`seeksHelp`、`helpUpdatedAt`、`helpTo`，外加一句话 `summary`（自然语言）。无同伴时响应不变。想进一步了解详情或判断是否互相干扰：`GET /agent/book`（完整会话、注意事项与 `helpLog` 最近求助历史）、`GET /agent/lock/status?site=*`（已持有的锁，含自然语言 `lock`）、必要时先 `POST /agent/lock/acquire`。`lock` 是 Agent **自报**的锁状态（文案为 “reports holding …”），可能与 SiteLock 实际持有状态不同；以 `/agent/lock/status` 为准。需要其他 Agent 协助时在任意请求加 `agentHelp=<需求>`，定向加 `agentHelpTo=<agentId>`；对方会在 `seeksHelp`/`helpTo` 看到，`helpLog` 保留最近 20 条去重求助。完事用 `agentDone=true` 或 `POST /agent/book/release` 清除自己在场状态（`agentHelp` 随之消失）。`/agent/book`、`/agent/lock/status`、`/agent/registry` 等协调/轮询端点未显式给 `agentOp` 时保留上一次真实操作，不会把 `doing` 覆盖成轮询路径（显式 `agentOp` 仍优先）。
+>
+> **跨版本互通原则（自然语言 + 数学）**：同伴信息里允许数值字段，但字段名必须自解释、可由对方直接计算（如 `idleSeconds`、`estimatedWaitSeconds`）；状态语义用自然语言句子表达（如 `lock: "holds a write lock"`、`summary`）。**禁止**把预定义枚举/数字码当作跨版本契约（如 `status: 1` 表示 Active、`lockMode: 2` 表示 Write）——这类“私有知识”不同版本的 Puppet 未必共享；自然语言与数学才是共享语言。`/agent/book` 里的旧枚举/数字字段仅为向后兼容保留，新调用方不要依赖其具体取值。
 
 ## Agent 使用与迭代原则（必读）
 
@@ -305,6 +315,15 @@ var file = plan.Run();
 
 > **关键**：Puppet.Core 运行在宿主进程内，宿主崩溃 → 所有静态表失效。崩溃重启协商靠外部守护进程/用户，**不在本框架范围**。
 
+### 跨版本互通原则（自然语言 + 数学）
+
+多 Agent / 多 Puppet 版本共存时，**只有自然语言与数学是共享知识**：
+
+- **允许**数值字段，但字段名必须自解释、对方能直接计算——如 `idleSeconds`（距上次调用秒数）、`estimatedWaitSeconds`（对方自己声明的预计剩余秒数）。
+- **允许**自然语言描述语义——如 `lock: "holds a write lock"`、`summary` 整句。
+- **禁止**把预定义枚举 / 数字码当作跨版本契约——如 `status: 1` 表示 Active、`lockMode: 2` 表示 Write。这类映射是当前版本的**私有知识**，别的版本未必知道；一旦版本升级或字段复用，对方会静默误读。
+- 旧接口若已发布数字/枚举字段，保留它们只为向后兼容；新字段与新调用方一律使用自解释名称 + 自然语言。
+
 ### PLog —— 极简日志转发
 
 宿主已有日志系统（log4net/Serilog/NLog/自研）时，Agent 想同步一份到 Puppet 端观测，**零侵入、零依赖传播**：
@@ -336,7 +355,9 @@ UserLogger.Debug(PLog.Fwd(LogLevel.Debug, "login user={0}", userName));
   ```
   返回 `{ "canShutdown": true }` 表示无其他活跃 Agent，可安全关闭进程；`false` 则建议不关或继续等待。
 
-**AgentInfo 字段**：`Id`、`Purpose`、`Operation`、`EstimatedWaitSeconds`、`Status(Active/Idle/ShuttingDown)`、`RegisteredAt`、`LastHeartbeatAt`、`PuppetInstanceName`、`CurrentSite`、`CurrentLockMode`。
+**AgentInfo 字段**：`Id`、`Purpose`、`Operation`、`EstimatedWaitSeconds`、`Status(Active/Idle/ShuttingDown)`、`RegisteredAt`、`LastHeartbeatAt`、`PuppetInstanceName`、`CurrentSite`、`CurrentLockMode`、`Note`、`Help`、`HelpUpdatedAt`、`HelpTo`。`GET /agent/book` 另为每个 Agent 附自解释字段 `idleSeconds`、`lastActive`、`shuttingDown`、`lock`、`seeksHelp`、`helpUpdatedAt`、`helpTo`，并返回 `helpLog`（最近 20 条去重求助，含 `AgentId`/`Text`/`To`/`At`）。`lock` 为 Agent 自报状态（“reports holding …”），实际锁以 `/agent/lock/status` 的 SiteLock 派生结果为准；数字/枚举字段仅为向后兼容保留，新调用方请读这些自解释字段，跨版本更稳。
+
+**在场同伴提示**：`/agent/*` 与 `/appagent/*` 的响应会自动附带其他 Agent 的摘要（详见「透传参数」与「跨版本互通原则」）。`Note` 用于跨 Agent 留言（「不要关闭宿主」等），`Help` 用于求助/邀请协作；两者随每次调用保留，直到被新值覆盖或分别用 `agentNote=` / `agentHelp=` 清空。会话结束调用 `agentDone=true`（任意端点）或 `POST /agent/book/release`，其状态立即从所有后续响应中消失。
 
 ### SiteLock —— 建议性读写锁
 
@@ -479,6 +500,8 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 | `GET /appagent/assets/{id}` | **Bearer** | 产物下载（内存态模拟磁盘文件） |
 
 **发现（三级，零手动配置）**：L0 枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json`（{app, endpoint, key, protocol, pid, registeredAt}，用户档案 ACL 隔离——RDP 其他用户/远程读不到即拒绝，OS 用户隔离代行授权）；L1 扫描端口 + probe；L2 读 help。用户只需说“访问本地 9090 端口了解详情”。
+
+**多 Agent 协调（与 A 面同语义）**：`/appagent/*` 同样识别 `agentId`/`agentPurpose`/`agentOp`/`agentWaitEst`/`site`/`lockMode`/`agentNote`/`agentHelp`/`agentDone` 透传参数，自动写 AgentBook 心跳（未给 `site` 时按 `actions/<name>` / `state/<key>` 推断）；存在其他 Agent 时 JSON 响应自动附带 `peers`/`peersHint`。同伴字段遵循「自然语言 + 数学」原则：数值字段名自解释（`idleSeconds` 等），语义用自然语言（`lock`/`summary`），不使用预定义枚举码。二进制产物（`/appagent/assets/*`）与 4xx/5xx 响应不附加，避免污染字节或泄露他人会话。
 
 ### Actionize 范式（无需逐个标注）
 

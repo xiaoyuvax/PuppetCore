@@ -18,6 +18,17 @@ internal static class SelfTest
         var model = (ReadingList)window.DataContext;
         Check(SynchronizationContext.Current is DispatcherSynchronizationContext
             && ReferenceEquals(PuppetRegistry.Resolve("ReadingList"), model), "Loaded registration on dispatcher");
+        Check(model.AgentPresence.Contains("ReadingList (ReadingList)", StringComparison.Ordinal), "presence lists registration");
+        var presenceAgent = "selftest-presence-" + Guid.NewGuid().ToString("N");
+        AgentBook.Heartbeat(presenceAgent, "verify presence", "/agent/registry", 0, "ReadingList", "BookList", LockMode.Write, "selftest note", "selftest help");
+        try
+        {
+            window.RefreshPresence();
+            Check(model.AgentPresence.Contains(presenceAgent, StringComparison.Ordinal)
+                && model.AgentPresence.Contains("selftest help", StringComparison.Ordinal)
+                && model.AgentPresence.Contains("selftest note", StringComparison.Ordinal), "presence shows agent status and help");
+        }
+        finally { AgentBook.Release(presenceAgent); }
         Check(model.TotalCount == 0 && model.OverallProgress == 0, "empty aggregate");
         Check(!model.UpdateProgress("0") && !model.RemoveSelectedBook() && !model.SelectBook(0), "no selection");
         foreach (var title in new[] { null, " \t ", "a\nb", new string('x', 121) })

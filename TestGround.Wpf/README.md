@@ -19,6 +19,8 @@ dotnet build TestGround.Wpf.csproj -c Release
 
 由启动进程的环境安全注入非空白 `PUPPET_TESTGROUND_KEY`；不要写入配置、脚本或日志。Loaded 在主 Dispatcher 注册 `ReadingList`，仅监听 `127.0.0.1:19103`。未给密钥不启动服务器；端口冲突时本地书架仍可用。读取环境后清除进程内该变量，访问密钥动态读取 PuppetKeyVault；退出注销、停止服务并刷新密钥。
 
-Agent 使用 Bearer 鉴权调用 `/agent/invoke?name=ReadingList&method=AddBook`，JSON 数组参数例如 `["小王子","100"]`。其余用户操作为 `SelectBook(index)`（当前可见列表零基索引）、`UpdateProgress(readPages)`、`SetFilter(filter)`、`RemoveSelectedBook()`；页数参数为字符串，与 UI 输入共用验证。筛选值为“全部 / 未读完 / 已读完”。观察使用 `/agent/get?name=ReadingList&path=SelectedReadPages` 等标量属性，不序列化整个 Window，不提供 `/agent/control`。
+窗口底部“Puppet 注册”区域每秒刷新：列出已注册 Puppet，以及每个 Agent 的实例、站点、操作、状态、空闲秒数、锁、注意与求助内容；数据变化会直接反映到绑定，无需刷新窗口。
+
+Agent 使用 Bearer 鉴权调用 `/agent/invoke?name=ReadingList&method=AddBook`，JSON 数组参数例如 `["小王子","100"]`。其余用户操作为 `SelectBook(index)`（当前可见列表零基索引）、`UpdateProgress(readPages)`、`SetFilter(filter)`、`RemoveSelectedBook()`；页数参数为字符串，与 UI 输入共用验证。筛选值为“全部 / 未读完 / 已读完”。观察使用 `/agent/get?name=ReadingList&path=SelectedReadPages` 等标量属性，不序列化整个 Window，不提供 `/agent/control`。`AgentPresence` 同样可读。
 
 运行自检与实际结果见 DEVELOPMENT.md；约束见 AGENTS.md。项目未加入解决方案，不打包，无新增直接 NuGet 依赖，只引用 Puppet.Core 与 Puppet.Core.Wpf。

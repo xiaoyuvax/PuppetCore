@@ -28,6 +28,7 @@ public sealed class ReadingList : INotifyPropertyChanged, IPuppet
     [PuppetIgnore] private string _filter = "全部";
     [PuppetIgnore] private string _status = Loc.T("从一本想读的书开始。数据仅保存在本次会话。", "Start with a book you want to read. Data lives only in this session.");
     [PuppetIgnore] private string _agentStatus = Loc.T("Puppet 尚未启动", "Puppet not started");
+    [PuppetIgnore] private string _agentPresence = "";
 
     [PuppetIgnore] [field: PuppetIgnore] public event PropertyChangedEventHandler? PropertyChanged;
     [PuppetIgnore] string IPuppet.AgentAccessKey => PuppetKeyVault.GlobalKey;
@@ -81,6 +82,7 @@ public sealed class ReadingList : INotifyPropertyChanged, IPuppet
     public string SelectionSummary => _selected?.PageSummary ?? Loc.T("在左侧选择一本书，记录今天读到的页数。", "Select a book on the left and log today's pages.");
     public string StatusText => _status;
     public string AgentStatus => _agentStatus;
+    public string AgentPresence => _agentPresence;
 
     public ReadingList()
     {
@@ -159,6 +161,13 @@ public sealed class ReadingList : INotifyPropertyChanged, IPuppet
     internal void SetAgentStatus(string status)
     {
         _agentStatus = status;
+        Notify();
+    }
+
+    [PuppetIgnore]
+    internal void SetAgentPresence(string presence)
+    {
+        _agentPresence = presence;
         Notify();
     }
 

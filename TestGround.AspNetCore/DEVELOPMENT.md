@@ -74,6 +74,14 @@ try {
 - 真实浏览器全链路（Edge，仅走用户路径：UIA 驱动密码框输入、点击 Use key、勾选开关，无调试钩子，密钥不落盘）：`CaptureAction` 经 Agent 端点返回合法 PNG（1149×1469，魔数正确，约 142 KB），重复两次成功；经程序校验尺寸与颜色多样性（153 种颜色、38% 非白像素），排除空白画布。期间实测发现并修复：`createImageBitmap(SVG Blob)` 不能解码 foreignObject SVG，改为 `data:` URL `<img>`；克隆不含表单状态，改为写回 attribute（密码框除外）；页面状态行显示导出错误。视觉保真度（字体、圆角、阴影、勾选框呈勾选态）已经用户核对截图确认正常（2026-10-07）。
 - 运维陷阱：浏览器标签页开关开启时会持续轮询固定端口 19204，使自检的“未授权 CaptureAction 立即拒绝”检查因在场信号新鲜而挂满 5 秒等待，最终在 Invoke 处抛 TaskCanceledException——跑自检前先把各标签页开关关掉或关闭页面。后台标签页的 UIA 元素与前台无法区分（RuntimeId 为空、IsOffscreen 均为 false），需逐个标签页尝试。
 
+## 已验证证据（2026-10-21，Puppet/Agent 在场刷新）
+
+- 新增匿名读取 `GET /api/presence`：返回 `enabled`、`puppets`（`PuppetRegistry` 注册实例）和 `agents`（`AgentBook` 的实例、站点、操作、状态、空闲秒数、锁、注意、求助）。
+- 页面新增“Puppet 注册与求助”卡片，加载后立即读取并每 2 秒刷新；渲染全部使用 `textContent`，无 HTML 注入；请求失败时只在首次提示，不打断库存操作。
+- 自检注入带 note/help 的 Agent 心跳后，断言 `/api/presence` 同时包含 `Inventory` 注册项和该 Agent 的注意/求助，随后移除心跳；同时断言页面包含 `#puppets`、`#agents` 与接口路径。
+- Release 构建 0 warnings / 0 errors；带密钥 `--self-test` 退出 0。
+- 真实浏览器（headless Chromium，中文 locale）验证：页面加载后 presence 表格显示已注册的 `Inventory` 与“暂无 Agent 接入”，控制台 0 错误、0 失败请求；随后经 `/agent/book/heartbeat` 注入带 note/help 的 Agent，不刷新页面，3 秒内表格自动出现该 Agent、站点、操作、空闲时间与“注意/求助”文本，证明轮询与渲染链路实际生效。
+
 ## 后续任务（按实际需求推进）
 
 1. 手动浏览器核对创建/预留/释放、密码遗忘、中文名称与窄屏键盘可用性；补标准进程 Ctrl+C 和端口占用回归，仍不暴露测试钩子。

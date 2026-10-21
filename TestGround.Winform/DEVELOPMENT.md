@@ -6,7 +6,7 @@
 - `Program.cs`：STA 消息循环与 `--self-test` 编排入口；测试完成后检查注销和监听端口释放。
 - `SelfTest.cs`：内部验证编排，通过真实用户方法、原生控件和既有 HTTP API 操作；不是注册实例，也没有暴露的测试成员。
 - 日志与操作分开：用户反馈在 StatusText，ILog 由 Common.Logging.LogManager 创建。未承诺该 logger 自动出现在 Wima LogBook；框架自身仍会产生使用日志。
-- 关闭时先注销，再后台停止服务器，避免 UI 线程等待正在回调 UI 的 HTTP 请求。无持久化、无额外刷新线程。
+- 关闭时先注销，再后台停止服务器，避免 UI 线程等待正在回调 UI 的 HTTP 请求。无持久化；Puppet/Agent 面板用 UI 线程上的 1 秒 `System.Windows.Forms.Timer` 轮询进程内状态，不引入后台线程。
 
 ## 已验证（2026-09-17，Windows / SDK 10.0.401）
 
@@ -49,10 +49,18 @@ try {
 - `DrawTaskItem` 的字体改为 `using` 释放，消除每次绘制的 GDI 句柄泄漏。
 - 改动后重跑：Release 构建 0 错误，无密钥与含密钥自检均退出 0。
 
+## 已验证（2026-10-21，Puppet/Agent 在场刷新）
+
+- 底部新增只读 `PuppetPresence` 面板与 1 秒 `System.Windows.Forms.Timer`：读取 `PuppetRegistry.Query(includeInternal: true)` 和 `AgentBook.GetAll(includeStale: true)`，显示已注册 Puppet 以及每个 Agent 的实例、站点、操作、状态、空闲秒数、锁、注意与求助；`PresenceText` 可经 A 面标量观察。
+- 面板分区为「Puppet 注册 / 求助 / Agent 状态」：带求助的 Agent 置顶并标 `[求助]`（定向标 `[求助→目标]`），`idle > 60s` 标 `[超过60秒未心跳]`；`lock` 使用 “reports holding …” 文案，明确它是 Agent 自报而非 SiteLock 实际状态。
+- 面板高度 210（窗口 860×780），按 Agent ID 稳定排序；刷新写入新文本前用 `EM_GETFIRSTVISIBLELINE` 记录首行，写入后用 `EM_LINESCROLL` 恢复，避免每秒刷新跳回顶部。
+- 自检在真实注册后注入带 note/help 的 Agent 心跳，断言面板包含注册名、注意、求助内容与求助分区标记，随后移除心跳；计时器在 `OnFormClosed` 停止并释放。
+- 2026-10-21 复验：`dotnet test tests/Puppet.Core.Tests -f net10.0` 60/60 通过（覆盖 JSON charset、lock/status 自然语言、doing 轮询保持、求助时间戳/定向/历史）；WinForms Release 编译至临时输出 0 错误，主输出因运行中实例锁定未覆盖。无密钥与带密钥 `--self-test` 需在停掉 19101 实例后复跑。
+
 ## 限制与演进清单
 
 - 任务只存内存，删除无撤销；有需求再加本地持久化与撤销，不预建仓储层。
-- 当前无异步样例刷新；有真实数据源再加取消、失败提示及就绪状态。
+- Puppet/Agent 面板为进程内状态轮询；外部异步数据源、取消与失败提示仍按实际需求再加。
 - 多 DPI 三屏缩放已验证（见上节）；尚未人工验收屏幕阅读器、高对比度和极端缩放，当前为原生控件、命名、AccessibleName、快捷键、最小尺寸及伸缩布局。
 - 尚未验证端口占用、Windows 注销、异常强制退出、并发外部调用关闭等边界。
 - 现有服务器输出 wwwroot 不存在与 HTTP/2、HTTP/3 无 TLS 的警告；已验证仍以 HTTP/1.1 正常完成回环请求，未创建无用静态目录或更改核心代码。

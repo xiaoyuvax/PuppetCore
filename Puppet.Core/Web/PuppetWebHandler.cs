@@ -39,7 +39,9 @@ namespace Puppet.Core.Web
             {
                 try
                 {
-                    return PuppetMcpHandler.TryHandle(ref req);
+                    var mcpHandled = PuppetMcpHandler.TryHandle(ref req);
+                    if (mcpHandled) EnsureUtf8JsonContentType(ref req);
+                    return mcpHandled;
                 }
                 catch (Exception ex)
                 {
@@ -47,6 +49,7 @@ namespace Puppet.Core.Web
                     req.Response.StatusCode = 500;
                     req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = false, err = ex.Message }));
                     req.Response.SetJsonContent();
+                    EnsureUtf8JsonContentType(ref req);
                     return true;
                 }
             }
@@ -54,9 +57,10 @@ namespace Puppet.Core.Web
             if (!req.Path.StartsWith(PREFIX)) return false;
 
             PuppetUsage.Track("endpoint", $"{req.Method} {req.Path} name={req.Queries?["name"]}");
+            bool handled;
             try
             {
-                return HandleCore(ref req);
+                handled = HandleCore(ref req);
             }
             catch (Exception ex)
             {
@@ -64,31 +68,27 @@ namespace Puppet.Core.Web
                 req.Response.StatusCode = 500;
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = false, err = ex.Message }));
                 req.Response.SetJsonContent();
+                EnsureUtf8JsonContentType(ref req);
                 return true;
             }
+
+            if (handled)
+            {
+                FinishAgentCall(ref req);
+                EnsureUtf8JsonContentType(ref req);
+            }
+            return handled;
         }
 
         /// <summary>端点分发核心逻辑（经 TryHandle 包一层使用日志 + 意外上报）</summary>
         private static bool HandleCore(ref WebRequest req)
         {
-            // 提取 Agent 协调参数（可选，向后兼容）
-            var agentId = req.Queries?["agentId"];
-            var purpose = req.Queries?["agentPurpose"];
-            var operation = req.Queries?["agentOp"] ?? req.Path;
-            var waitEst = ParseInt(req.Queries?["agentWaitEst"], 0);
-            var site = req.Queries?["site"];
-            var lockModeStr = req.Queries?["lockMode"];
-            LockMode lockMode = LockMode.None;
-            if (!string.IsNullOrEmpty(lockModeStr))
-                Enum.TryParse(lockModeStr, true, out lockMode);
-
             var key = ExtractKey(req);
             var name = req.Queries?["name"];
             var target = PuppetRegistry.Resolve(name);
 
             // 自动心跳（所有 /agent/* 调用均更新 AgentBook）
-            if (!string.IsNullOrEmpty(agentId))
-                AgentBook.Heartbeat(agentId, purpose ?? "", operation, waitEst, name ?? "unknown", site, lockMode);
+            NoteAgentCall(ref req, name);
 
             // 元端点：条件查询已注册实例（仅全局密钥）
             if (req.Path == "/agent/registry" && req.Method == "GET")
@@ -349,13 +349,194 @@ namespace Puppet.Core.Web
             return true;
         }
 
+        /// <summary>统一解析 agentId/agentPurpose/agentOp/agentWaitEst/site/lockMode/agentNote/agentHelp 并写 AgentBook 心跳。
+        /// A 面（/agent/*）与 B 面（/appagent/*）共用；B 面未显式给 site 时按动作/状态名推断站点。</summary>
+        internal static void NoteAgentCall(ref WebRequest req, string instanceName)
+        {
+            var agentId = req.Queries?["agentId"];
+            if (string.IsNullOrEmpty(agentId)) return;
+
+            var site = req.Queries?["site"];
+            if (string.IsNullOrEmpty(site))
+            {
+                var p = req.PathCaseSensitive ?? req.Path ?? "";
+                const string actions = "/appagent/actions/";
+                const string state = "/appagent/state/";
+                if (p.StartsWith(actions, StringComparison.OrdinalIgnoreCase)) site = p[actions.Length..];
+                else if (p.StartsWith(state, StringComparison.OrdinalIgnoreCase)) site = p[state.Length..];
+            }
+
+            LockMode lockMode = LockMode.None;
+            var lockModeStr = req.Queries?["lockMode"];
+            if (!string.IsNullOrEmpty(lockModeStr)) Enum.TryParse(lockModeStr, true, out lockMode);
+
+            var operation = req.Queries?["agentOp"];
+            if (string.IsNullOrEmpty(operation))
+                operation = IsCoordinationPath(req.Path) ? null : req.Path;
+
+            AgentBook.Heartbeat(agentId, req.Queries?["agentPurpose"] ?? "",
+                operation, ParseInt(req.Queries?["agentWaitEst"], 0),
+                instanceName ?? "unknown", site, lockMode, req.Queries?["agentNote"], req.Queries?["agentHelp"],
+                req.Queries?["agentHelpTo"] ?? req.Queries?["helpTo"]);
+        }
+
+        /// <summary>只读协调/轮询端点：未显式提供 agentOp 时保留上一次真实操作，避免 doing 被轮询覆盖。</summary>
+        private static bool IsCoordinationPath(string path) => path is
+            "/agent/book" or "/agent/book/heartbeat" or "/agent/book/release" or
+            "/agent/lock/status" or "/agent/registry" or "/agent/usage" or "/agent/hints" or
+            "/agent/logs" or "/agent/capabilities" or "/agent/probe" or
+            "/appagent/probe" or "/appagent/manifest";
+
+        /// <summary>JSON 响应补 charset=utf-8，避免客户端按 Latin-1 解码中文。</summary>
+        internal static void EnsureUtf8JsonContentType(ref WebRequest req)
+        {
+            var contentType = req.Response.Headers?.Get("Content-Type");
+            if (string.IsNullOrEmpty(contentType)) return;
+            if (contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)
+                && contentType.IndexOf("charset", StringComparison.OrdinalIgnoreCase) < 0)
+                req.Response.Headers.Set("Content-Type", contentType + "; charset=utf-8");
+        }
+
+        /// <summary>响应收尾：附加在场同伴，并处理 agentDone（本次即最后一次调用）。</summary>
+        internal static void FinishAgentCall(ref WebRequest req)
+        {
+            AnnotatePeers(ref req);
+            var selfId = req.Queries?["agentId"];
+            if (!string.IsNullOrEmpty(selfId) && req.Queries?["agentDone"] is "1" or "true")
+                AgentBook.Release(selfId);
+        }
+
+        /// <summary>同伴提示文案（附在每个含同伴的回复里，告诉 Agent 下一步查什么）。</summary>
+        private const string PeerHint =
+            "Other agents are active. Use idleSeconds to judge liveness (large = possibly dropped). " +
+            "Coordinating APIs: GET /agent/book (full sessions + notes + helpLog), GET /agent/lock/status?site=* (locks), " +
+            "POST /agent/lock/acquire {site,mode} before touching a shared site. " +
+            "Need help or want to invite collaboration? Add ?agentHelp=<what you need> to any call; add ?agentHelpTo=<agentId> to target one peer, or agentHelpTo= to broadcast. " +
+            "Peers see it as seeksHelp until you clear it with agentHelp=. " +
+            "When done: call any endpoint with agentDone=true (or POST /agent/book/release {id}) so others stop seeing you.";
+
+        /// <summary>单个同伴视图：数值字段名自解释（idleSeconds/estimatedWaitSeconds），状态语义用自然语言表达。</summary>
+        private sealed record PeerView(string Id, string Instance, string Site, string Doing, string Purpose,
+            int IdleSeconds, string LastActive, int EstimatedWaitSeconds, bool ShuttingDown,
+            string Lock, string Note, string SeeksHelp, DateTime? HelpUpdatedAt, string HelpTo, string Summary);
+
+        private static PeerView ToPeerView(AgentInfo a, DateTime now)
+        {
+            var idle = (int)Math.Max(0, (now - a.LastHeartbeatAt).TotalSeconds);
+            var lockText = AgentBook.DescribeReportedLock(a.CurrentLockMode);
+            var note = string.IsNullOrEmpty(a.Note) ? null : a.Note;
+            var help = string.IsNullOrEmpty(a.Help) ? null : a.Help;
+            var helpTo = string.IsNullOrEmpty(a.HelpTo) ? null : a.HelpTo;
+            var shuttingDown = a.Status == AgentStatus.ShuttingDown;
+
+            var parts = new List<string> { $"{a.Id} is on instance {a.PuppetInstanceName}" };
+            if (!string.IsNullOrEmpty(a.CurrentSite)) parts.Add($"at site {a.CurrentSite}");
+            if (!string.IsNullOrEmpty(a.Operation)) parts.Add($"doing {a.Operation}");
+            if (!string.IsNullOrEmpty(a.Purpose)) parts.Add($"for {a.Purpose}");
+            parts.Add($"last called {idle} seconds ago");
+            if (a.EstimatedWaitSeconds > 0) parts.Add($"expects about {a.EstimatedWaitSeconds} more seconds");
+            parts.Add(lockText);
+            if (shuttingDown) parts.Add("is shutting down");
+            if (note != null) parts.Add($"note: {note}");
+            if (help != null) parts.Add(helpTo != null ? $"seeks help from {helpTo}: {help}" : $"seeks help: {help}");
+
+            return new PeerView(a.Id, a.PuppetInstanceName, a.CurrentSite, a.Operation, a.Purpose,
+                idle, a.LastHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss"), a.EstimatedWaitSeconds, shuttingDown,
+                lockText, note, help, a.HelpUpdatedAt, helpTo, string.Join("; ", parts));
+        }
+
+        /// <summary>把在场同伴（排除自己）的简要信息附加到响应；无同伴则不动响应体。</summary>
+        internal static void AnnotatePeers(ref WebRequest req)
+        {
+            if (req.Response.StatusCode >= 400) return;   // 错误/未认证响应不披露其他会话
+            var ct = req.Response.Headers?.Get("Content-Type") ?? "";
+            if (ct.Length > 0 && !ct.Contains("json") && !ct.Contains("text") && !ct.Contains("markdown"))
+                return;                                    // 二进制产物（如 /appagent/assets/*）绝不改写
+
+            var selfId = req.Queries?["agentId"];
+            var now = DateTime.Now;
+            var peers = AgentBook.GetAll()
+                .Where(a => a.Id != selfId)
+                .OrderByDescending(a => a.LastHeartbeatAt)
+                .Select(a => ToPeerView(a, now))
+                .ToArray();
+            if (peers.Length == 0) return;
+            if (req.Response.Buffer is not { Length: > 0 } raw) return;
+
+            var hint = string.IsNullOrEmpty(selfId)
+                ? "You are not registered (no agentId): add ?agentId=<unique-id>&site=<your-site>&agentNote=<your-note> to your calls so other agents can see you. " + PeerHint
+                : PeerHint;
+            var text = Encoding.UTF8.GetString(raw);
+            var trimmed = text.TrimStart();
+            // JSON 对象：加 peers / peersHint 字段（保持原形状）
+            if (trimmed.StartsWith("{", StringComparison.Ordinal))
+            {
+                try
+                {
+                    var obj = JObject.Parse(text);
+                    obj["peers"] = new JArray(peers.Select(p => new JObject
+                    {
+                        ["id"] = p.Id,
+                        ["instance"] = p.Instance,
+                        ["site"] = p.Site,
+                        ["doing"] = p.Doing,
+                        ["purpose"] = p.Purpose,
+                        ["idleSeconds"] = p.IdleSeconds,
+                        ["lastActive"] = p.LastActive,
+                        ["estimatedWaitSeconds"] = p.EstimatedWaitSeconds,
+                        ["shuttingDown"] = p.ShuttingDown,
+                        ["lock"] = p.Lock,
+                        ["note"] = p.Note,
+                        ["seeksHelp"] = p.SeeksHelp,
+                        ["helpUpdatedAt"] = p.HelpUpdatedAt,
+                        ["helpTo"] = p.HelpTo,
+                        ["summary"] = p.Summary
+                    }));
+                    obj["peersHint"] = hint;
+                    req.Response.Buffer = Encoding.UTF8.GetBytes(obj.ToString(Formatting.None));
+                    return;
+                }
+                catch { /* 非合法 JSON，走文本追加 */ }
+            }
+            // 顶层数组契约（如 /agent/logs 列表）不破坏
+            if (trimmed.StartsWith("[", StringComparison.Ordinal)) return;
+
+            // Markdown / 纯文本响应：追加可读区块（describe?format=md、/agent/docs、/agent/logs）
+            var sb = new StringBuilder(text);
+            sb.AppendLine().AppendLine().AppendLine("---").AppendLine("### Other agents active on this puppet");
+            foreach (var p in peers)
+                sb.Append("- ").AppendLine(p.Summary);
+            sb.AppendLine().Append(hint);
+            req.Response.Buffer = Encoding.UTF8.GetBytes(sb.ToString());
+        }
+
         private static bool HandleAgentBook(ref WebRequest req)
         {
             if (req.Path == "/agent/book" && req.Method == "GET")
             {
                 var includeStale = req.Queries["includeStale"] == "true";
-                var agents = AgentBook.GetAll(includeStale);
-                req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true, agents }));
+                var now = DateTime.Now;
+                var agents = AgentBook.GetAll(includeStale).Select(a => new
+                {
+                    a.Id, a.Purpose, a.Operation, a.PuppetInstanceName, a.CurrentSite,
+                    idleSeconds = (int)Math.Max(0, (now - a.LastHeartbeatAt).TotalSeconds),
+                    lastActive = a.LastHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                    a.EstimatedWaitSeconds,
+                    shuttingDown = a.Status == AgentStatus.ShuttingDown,
+                    @lock = AgentBook.DescribeReportedLock(a.CurrentLockMode),
+                    a.Note,
+                    seeksHelp = string.IsNullOrEmpty(a.Help) ? null : a.Help,
+                    helpUpdatedAt = a.HelpUpdatedAt,
+                    helpTo = string.IsNullOrEmpty(a.HelpTo) ? null : a.HelpTo,
+                    // 旧字段保留以兼容既有调用方；新调用方请使用上面的自解释字段（跨版本更稳）
+                    a.Status, a.CurrentLockMode, a.RegisteredAt, a.LastHeartbeatAt
+                });
+                req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
+                {
+                    ok = true,
+                    agents,
+                    helpLog = AgentBook.GetHelpLog()
+                }));
                 req.Response.SetJsonContent();
                 return true;
             }
@@ -368,12 +549,18 @@ namespace Puppet.Core.Web
                 var op = body?["op"]?.ToString();
                 var wait = ParseInt(body?["waitEst"]?.ToString(), 0);
                 var site = body?["site"]?.ToString();
+                var note = body?["note"]?.ToString();
+                var help = body?["help"]?.ToString();
+                var helpTo = body?["helpTo"]?.ToString() ?? body?["agentHelpTo"]?.ToString();
                 var lmStr = body?["lockMode"]?.ToString();
                 LockMode lm = LockMode.None;
                 if (!string.IsNullOrEmpty(lmStr)) Enum.TryParse(lmStr, true, out lm);
 
                 if (!string.IsNullOrEmpty(id))
-                    AgentBook.Heartbeat(id, purp ?? "", op ?? "", wait, "unknown", site, lm);
+                {
+                    req.Queries["agentId"] = id;
+                    AgentBook.Heartbeat(id, purp, op, wait, "unknown", site, lm, note, help, helpTo);
+                }
 
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true }));
                 req.Response.SetJsonContent();
@@ -389,6 +576,7 @@ namespace Puppet.Core.Web
 
                 if (string.IsNullOrEmpty(id)) { req.Response.StatusCode = 400; return true; }
 
+                req.Queries["agentId"] = id;
                 bool canShutdown = true;
                 if (waitOthers) canShutdown = AgentBook.CanShutdown(id, timeout);
                 if (canShutdown) AgentBook.Release(id);
@@ -414,6 +602,7 @@ namespace Puppet.Core.Web
                 if (string.IsNullOrEmpty(site) || string.IsNullOrEmpty(agentId))
                 { req.Response.StatusCode = 400; return true; }
 
+                req.Queries["agentId"] = agentId;
                 Enum.TryParse(modeStr, true, out LockMode mode);
                 var ok = SiteLock.TryAcquire(site, agentId, mode, timeout);
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok }));
@@ -430,6 +619,7 @@ namespace Puppet.Core.Web
                 if (string.IsNullOrEmpty(site) || string.IsNullOrEmpty(agentId))
                 { req.Response.StatusCode = 400; return true; }
 
+                req.Queries["agentId"] = agentId;
                 SiteLock.Release(site, agentId);
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true }));
                 req.Response.SetJsonContent();
@@ -441,13 +631,23 @@ namespace Puppet.Core.Web
                 var site = req.Queries["site"];
                 if (site == "*" || string.IsNullOrEmpty(site))
                 {
-                    var all = SiteLock.GetAll();
+                    var all = SiteLock.GetAll().Select(status => new
+                    {
+                        status.Site, status.OwnerAgentId, status.ReadCount, status.Since,
+                        @lock = AgentBook.DescribeLock(status.Mode),
+                        status.Mode
+                    });
                     req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true, locks = all }));
                 }
                 else
                 {
                     var status = SiteLock.GetStatus(site);
-                    req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true, @lock = status }));
+                    req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
+                    {
+                        ok = true,
+                        @lock = status,
+                        lockText = AgentBook.DescribeLock(status.Mode)
+                    }));
                 }
                 req.Response.SetJsonContent();
                 return true;

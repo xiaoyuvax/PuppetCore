@@ -392,6 +392,110 @@ namespace Puppet.Core.Tests
             finally { PuppetRegistry.Unregister("ExposeDescribe#1"); }
         }
 
+        /// <summary>多 Agent 可见性：回复自动带 peers（自解释数值 + 自然语言 + 求助），agentDone=true 后立即消失。</summary>
+        [Fact]
+        public void Responses_expose_other_agents_until_agentDone()
+        {
+            var a = "peer-a-" + Guid.NewGuid();
+            var b = "peer-b-" + Guid.NewGuid();
+            try
+            {
+                var beat = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey,
+                    $"agentId={a}&site=Form1.*&agentNote=do%20not%20shut%20down%20host&agentHelp=need%20help%20verifying%20save");
+                Assert.True(PuppetWebHandler.TryHandle(ref beat));
+
+                var req = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey, $"agentId={b}");
+                Assert.True(PuppetWebHandler.TryHandle(ref req));
+                var json = JObject.Parse(Body(req));
+                var peer = ((JArray)json["peers"]).FirstOrDefault(p => p.Value<string>("id") == a);
+                Assert.NotNull(peer);
+                Assert.Equal("Form1.*", peer.Value<string>("site"));
+                Assert.Equal("do not shut down host", peer.Value<string>("note"));
+                Assert.Equal("need help verifying save", peer.Value<string>("seeksHelp"));
+                Assert.True(peer.Value<int>("idleSeconds") >= 0);
+                Assert.False(string.IsNullOrEmpty(peer.Value<string>("lastActive")));
+                Assert.False(peer.Value<bool>("shuttingDown"));
+                Assert.Contains("reports holding no lock", peer.Value<string>("lock"));
+                Assert.Contains(a, peer.Value<string>("summary"));
+                Assert.Contains("seeks help", peer.Value<string>("summary"));
+                Assert.False(string.IsNullOrEmpty(peer.Value<string>("helpUpdatedAt")));
+                Assert.Contains("agent/book", json.Value<string>("peersHint"));
+                Assert.Contains("agentHelp", json.Value<string>("peersHint"));
+
+                var directed = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey,
+                    $"agentId={a}&agentHelp=need%20review&agentHelpTo={b}");
+                Assert.True(PuppetWebHandler.TryHandle(ref directed));
+                var book = MakeReq("GET", "/agent/book", PuppetKeyVault.GlobalKey);
+                Assert.True(PuppetWebHandler.TryHandle(ref book));
+                var bookJson = JObject.Parse(Body(book));
+                var bookAgent = ((JArray)bookJson["agents"]).First(x => x.Value<string>("Id") == a);
+                Assert.Equal(b, bookAgent.Value<string>("helpTo"));
+                var helpLog = (JArray)bookJson["helpLog"];
+                Assert.Contains(helpLog, x => x.Value<string>("AgentId") == a && x.Value<string>("Text") == "need help verifying save");
+                Assert.Contains(helpLog, x => x.Value<string>("AgentId") == a && x.Value<string>("Text") == "need review");
+
+                var done = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey, $"agentId={a}&agentDone=true");
+                Assert.True(PuppetWebHandler.TryHandle(ref done));
+
+                var again = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey, $"agentId={b}");
+                Assert.True(PuppetWebHandler.TryHandle(ref again));
+                var json2 = JObject.Parse(Body(again));
+                var peers2 = json2["peers"] as JArray ?? new JArray();
+                Assert.DoesNotContain(peers2, p => p.Value<string>("id") == a);
+            }
+            finally
+            {
+                AgentBook.Release(a);
+                AgentBook.Release(b);
+            }
+        }
+
+        /// <summary>锁状态带自然语言 lock；轮询 book 不覆盖真实 doing；JSON 响应带 charset=utf-8。</summary>
+        [Fact]
+        public void Lock_status_is_self_describing_and_polling_keeps_doing()
+        {
+            var agent = "lock-natural-" + Guid.NewGuid().ToString("N");
+            var acquire = MakeReq("POST", "/agent/lock/acquire", PuppetKeyVault.GlobalKey, $"agentId={agent}");
+            var body = Encoding.UTF8.GetBytes("{\"site\":\"LockNatural\",\"mode\":\"Write\"}");
+            acquire.InputStream = new MemoryStream(body);
+            acquire.ContentLength = body.Length;
+            Assert.True(PuppetWebHandler.TryHandle(ref acquire));
+            Assert.True(JObject.Parse(Body(acquire)).Value<bool>("ok"));
+            try
+            {
+                var status = MakeReq("GET", "/agent/lock/status", PuppetKeyVault.GlobalKey, "site=*");
+                Assert.True(PuppetWebHandler.TryHandle(ref status));
+                Assert.Contains("charset=utf-8", status.Response.Headers.Get("Content-Type"));
+                var lockEntry = ((JArray)JObject.Parse(Body(status))["locks"])
+                    .First(l => l.Value<string>("Site") == "LockNatural");
+                Assert.Equal("holds a write lock", lockEntry.Value<string>("lock"));
+                Assert.Equal((int)LockMode.Write, lockEntry.Value<int>("Mode"));
+
+                var beat = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey,
+                    $"agentId={agent}&agentOp=real-action&site=LockNatural");
+                Assert.True(PuppetWebHandler.TryHandle(ref beat));
+                var poll = MakeReq("GET", "/agent/book", PuppetKeyVault.GlobalKey, $"agentId={agent}");
+                Assert.True(PuppetWebHandler.TryHandle(ref poll));
+                Assert.Equal("real-action", AgentBook.GetAll().Single(a => a.Id == agent).Operation);
+
+                var heartbeat = MakeReq("POST", "/agent/book/heartbeat", PuppetKeyVault.GlobalKey);
+                var heartbeatBody = Encoding.UTF8.GetBytes($"{{\"id\":\"{agent}\",\"help\":\"need help via heartbeat\"}}");
+                heartbeat.InputStream = new MemoryStream(heartbeatBody);
+                heartbeat.ContentLength = heartbeatBody.Length;
+                Assert.True(PuppetWebHandler.TryHandle(ref heartbeat));
+                Assert.Equal("real-action", AgentBook.GetAll().Single(a => a.Id == agent).Operation);
+            }
+            finally
+            {
+                var release = MakeReq("POST", "/agent/lock/release", PuppetKeyVault.GlobalKey, $"agentId={agent}");
+                var releaseBody = Encoding.UTF8.GetBytes("{\"site\":\"LockNatural\"}");
+                release.InputStream = new MemoryStream(releaseBody);
+                release.ContentLength = releaseBody.Length;
+                Assert.True(PuppetWebHandler.TryHandle(ref release));
+                AgentBook.Release(agent);
+            }
+        }
+
         /// <summary>宿主：一个名为 ListViewItem 的类（Puppet.Core 不引用 WinForms，note 判定按类型名）。</summary>
         private sealed class ListViewHost : IPuppet
         {

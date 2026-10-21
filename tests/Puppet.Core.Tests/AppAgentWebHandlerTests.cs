@@ -148,6 +148,48 @@ namespace Puppet.Core.Tests
             finally { runtime.Unbind(); }
         }
 
+        /// <summary>B 面与 A 面同语义：JSON 响应带 peers/peersHint，agentDone=true 后会话立即消失。</summary>
+        [Fact]
+        public void Manifest_response_exposes_other_agents_and_agentDone_clears()
+        {
+            const string n = "AppAgentT.Peers";
+            var host = Register(n);
+            var (runtime, key) = StartRuntime(n);
+            var a = "appagent-peer-a-" + Guid.NewGuid();
+            var b = "appagent-peer-b-" + Guid.NewGuid();
+            try
+            {
+                AgentBook.Heartbeat(a, "test", "/appagent/actions/Run", 0, n, "Run", LockMode.Write,
+                    "do not close host", "need someone to check the result");
+
+                var req = MakeReq("GET", "/appagent/manifest", key, "agentId=" + b);
+                Assert.True(AppAgentWebHandler.TryHandle(ref req, runtime));
+                var json = JObject.Parse(Body(req));
+                Assert.True(json["peers"] is JArray, Body(req));
+                var peer = ((JArray)json["peers"]).FirstOrDefault(p => p.Value<string>("id") == a);
+                Assert.NotNull(peer);
+                Assert.Equal("Run", peer.Value<string>("site"));
+                Assert.Equal("do not close host", peer.Value<string>("note"));
+                Assert.Equal("need someone to check the result", peer.Value<string>("seeksHelp"));
+                Assert.True(peer.Value<int>("idleSeconds") >= 0);
+                Assert.Contains("write lock", peer.Value<string>("lock"));
+                Assert.Contains("do not close host", peer.Value<string>("summary"));
+                Assert.Contains("seeks help", peer.Value<string>("summary"));
+                Assert.Contains("agent/book", json.Value<string>("peersHint"));
+
+                var done = MakeReq("GET", "/appagent/manifest", key, $"agentId={b}&agentDone=true");
+                Assert.True(AppAgentWebHandler.TryHandle(ref done, runtime));
+                Assert.DoesNotContain(AgentBook.GetAll(), x => x.Id == b);
+            }
+            finally
+            {
+                AgentBook.Release(a);
+                AgentBook.Release(b);
+                runtime.Unbind();
+                PuppetRegistry.Unregister(n);
+            }
+        }
+
         [Fact]
         public void Invalid_key_error_hint_points_to_pid_suffixed_profile_file()
         {

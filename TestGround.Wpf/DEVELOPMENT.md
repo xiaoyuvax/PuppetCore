@@ -35,6 +35,12 @@ try {
 
 未验证：人工视觉审阅、屏幕阅读器与高对比度、多 DPI/显示器、端口冲突恢复、持续并发关闭压力。原生控件保留焦点行为，Label.Target、访问键、自动化名称及状态 LiveSetting 已声明；不把自动化事件测试等同人工无障碍认证。依赖当前工作区已有 PuppetRegistry / PuppetExtensions 的 UI fallback 实现，不主张在旧版核心上已验证。
 
+## 已验证（2026-10-21，Puppet/Agent 在场刷新）
+
+- 窗口底部新增 `AgentPresence` 绑定区：`DispatcherTimer` 每秒读取 `PuppetRegistry.Query(includeInternal: true)` 与 `AgentBook.GetAll()`，显示已注册 Puppet 及每个 Agent 的实例、站点、操作、状态、空闲秒数、锁、注意与求助；数据变化直接经 `INotifyPropertyChanged` 刷新。
+- 自检在真实注册后注入一个带 note/help 的 Agent 心跳，断言面板包含注册名、注意与求助内容，随后移除该心跳；Release 构建 0 warnings / 0 errors，带密钥 `--self-test` 退出 0。
+- 计时器随窗口 `Closing` 停止；无密钥模式仍显示本地注册状态，不依赖 Agent 服务。
+
 ## 分阶段演进（按实际需求）
 
 1. 当前：会话内单窗口清单，先补人工键盘、缩放、读屏回归；无数据库、命令框架、封面网络请求或后台同步。

@@ -11,6 +11,20 @@ internal static class SelfTest
     internal static async Task RunAsync(TaskBoardForm form)
     {
         Check(form.IsHandleCreated && ReferenceEquals(PuppetRegistry.Resolve("TaskBoard"), form), "UI-ready registration");
+        Check(form.PresenceText.Contains("TaskBoard (TaskBoardForm)", StringComparison.Ordinal), "presence lists registration");
+        var presenceAgent = "selftest-presence-" + Guid.NewGuid().ToString("N");
+        AgentBook.Heartbeat(presenceAgent, "verify presence", "/agent/registry", 0, "TaskBoard", "TaskList", LockMode.Read, "selftest note", "selftest help");
+        try
+        {
+            form.RefreshPresence();
+            Check(form.PresenceText.Contains(presenceAgent, StringComparison.Ordinal)
+                && form.PresenceText.Contains("selftest help", StringComparison.Ordinal)
+                && form.PresenceText.Contains("selftest note", StringComparison.Ordinal), "presence shows agent status and help");
+            Check(form.PresenceText.Contains(Loc.T("[求助]", "[help]"), StringComparison.Ordinal)
+                && form.PresenceText.Contains(Loc.T("求助 · ", "Help requests · "), StringComparison.Ordinal),
+                "presence groups help requests first");
+        }
+        finally { AgentBook.Release(presenceAgent); }
         Check(form.TotalCount == 0 && form.VisibleCount == 0, "empty board");
         Check(!form.AddTask(null) && !form.AddTask(" \t ") && !form.AddTask(new string('x', 121)) && !form.AddTask("a\nb"), "invalid titles");
         Check(!form.AddTask("bad priority", "紧急") && form.TotalCount == 0, "invalid priority rejected");

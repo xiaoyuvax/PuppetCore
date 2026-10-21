@@ -68,6 +68,13 @@ dotnet bin/Release/net10.0/TestGround.Console.dll --self-test
 
 底层 Kestrel 提示无 TLS 时禁用 HTTP/2、HTTP/3，实测 HTTP/1.1 正常。未手工验证真实终端 Ctrl+C、中文键盘编辑体验、跨平台运行、端口冲突恢复、持续压力或 chunked 请求。未做 AOT/Trim 发布验证。无独立 lint 命令，Release 编译作为当前类型检查。
 
+## 已验证（2026-10-21，Puppet/Agent 在场刷新）
+
+- 新增 `presence` 命令：输出 `PuppetRegistry` 注册实例与 `AgentBook` 中每个 Agent 的实例、站点、状态、空闲秒数、锁、注意与求助（JSON）。
+- 交互终端（stdin 未重定向）由 `WatchPresenceAsync` 每 2 秒对比一次摘要，内容变化时以 `[puppet]` 前缀写 stderr；重定向输入与自检不启动该提示，不改变既有 JSON 输出。
+- 自检注入带 note/help 的 Agent 心跳，断言 `presence` 同时包含 `ExpenseLedger` 注册项与该 Agent 的注意/求助，随后移除心跳。
+- Release 构建 0 warnings / 0 errors；`--self-test` 退出 0。
+
 ## 后续增量 backlog
 
 1. 先补实际终端 Ctrl+C、中文输入和异常断管场景的进程级回归；需要时再扩展自检，不添加暴露钩子。

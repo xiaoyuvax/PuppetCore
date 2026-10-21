@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Text;
 using Common.Logging;
 using Puppet.Core;
 using Puppet.Core.Web;
@@ -35,7 +37,15 @@ public sealed class TaskBoardForm : Form, IPuppet
     private readonly Button _clearDoneButton = MakeButton("ClearDoneButton", Loc.T("清除已完成 (&E)", "Clear completed (&E)"));
     private readonly Label _counts = MakeLabel("TaskCounts", "", 11);
     private readonly Label _status = MakeLabel("BoardStatus", Loc.T("从一件小事开始。任务仅保存在本次会话。", "Start with one small thing. Tasks live only in this session."), 10);
+    private readonly TextBox _presence = new()
+    {
+        Name = "PuppetPresence", AccessibleName = Loc.T("Puppet 注册、状态与求助", "Puppet registrations, status and help"),
+        Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.FixedSingle,
+        Dock = DockStyle.Fill, BackColor = Color.White, ForeColor = Color.FromArgb(35, 48, 65),
+        Font = new Font("Microsoft YaHei UI", 9.5f), TabStop = false, Margin = Padding.Empty
+    };
     private readonly Label _agentStatus = MakeLabel("AgentStatus", Loc.T("Puppet 尚未启动", "Puppet not started"), 9);
+    [PuppetIgnore] private readonly System.Windows.Forms.Timer _presenceTimer = new() { Interval = 1000 };
     [PuppetIgnore] private readonly ILog _log = LogManager.GetLogger(typeof(TaskBoardForm));
     [PuppetIgnore] private PuppetWebServer? _server;
     [PuppetIgnore] private TableLayoutPanel _layout = null!;
@@ -45,6 +55,12 @@ public sealed class TaskBoardForm : Form, IPuppet
     [PuppetIgnore] private bool _rendering;
     [PuppetIgnore] private bool _closing;
     [PuppetIgnore] private bool _shutdownComplete;
+    [PuppetIgnore] private static readonly float[] RowHeights = [56f, 36f, 50f, 44f, 0f, 54f, 40f, 210f, 28f];
+    private const int EmGetFirstVisibleLine = 0xCE;
+    private const int EmLineScroll = 0xB6;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     [PuppetIgnore] string IPuppet.AgentAccessKey => PuppetKeyVault.GlobalKey;
     [PuppetIgnore] ILog IPuppet.AgentLog => _log;
@@ -62,6 +78,7 @@ public sealed class TaskBoardForm : Form, IPuppet
     public string CurrentFilter => (_filter.SelectedItem as Choice)?.Value ?? "全部";
     public string StatusText => _status.Text;
     public string AgentStatus => _agentStatus.Text;
+    public string PresenceText => _presence.Text;
 
     public TaskBoardForm()
     {
@@ -71,14 +88,14 @@ public sealed class TaskBoardForm : Form, IPuppet
         Font = new Font("Microsoft YaHei UI", 11);
         BackColor = Color.FromArgb(243, 246, 250);
         ForeColor = Color.FromArgb(35, 48, 65);
-        ClientSize = new Size(860, 620);
-        MinimumSize = new Size(720, 540);
+        ClientSize = new Size(860, 780);
+        MinimumSize = new Size(720, 660);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        var layout = _layout = new TableLayoutPanel { Name = "BoardLayout", AccessibleName = Loc.T("任务看板布局", "Task board layout"), Dock = DockStyle.Fill, Padding = new Padding(28), ColumnCount = 1, RowCount = 8 };
-        foreach (var height in new[] { 56f, 36f, 50f, 44f, 0f, 54f, 40f, 28f })
+        var layout = _layout = new TableLayoutPanel { Name = "BoardLayout", AccessibleName = Loc.T("任务看板布局", "Task board layout"), Dock = DockStyle.Fill, Padding = new Padding(28), ColumnCount = 1, RowCount = RowHeights.Length };
+        foreach (var height in RowHeights)
             layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.Controls.Add(MakeLabel("Heading", Loc.T("小步  /  TASK BOARD", "PACE  /  TASK BOARD"), 23, FontStyle.Bold), 0, 0);
@@ -109,7 +126,8 @@ public sealed class TaskBoardForm : Form, IPuppet
         actions.Controls.AddRange([_completeButton, _removeButton, _renameButton, _priorityButton, _clearDoneButton]);
         layout.Controls.Add(actions, 0, 5);
         layout.Controls.Add(_status, 0, 6);
-        layout.Controls.Add(_agentStatus, 0, 7);
+        layout.Controls.Add(_presence, 0, 7);
+        layout.Controls.Add(_agentStatus, 0, 8);
         Controls.Add(layout);
         AcceptButton = _addButton;
         _taskInput.TabIndex = 0;
@@ -140,6 +158,8 @@ public sealed class TaskBoardForm : Form, IPuppet
         _metricsReady = true;
         ApplyMetrics();
         RenderTasks();
+        _presenceTimer.Tick += (_, _) => RefreshPresence();
+        RefreshPresence();
     }
 
     protected override void OnFontChanged(EventArgs e)
@@ -152,12 +172,11 @@ public sealed class TaskBoardForm : Form, IPuppet
     {
         var s = DeviceDpi / 96f;
         int S(float v) => (int)Math.Round(v * s);
-        var heights = new[] { 56f, 36f, 50f, 44f, 0f, 54f, 40f, 28f };
         _layout.Padding = new Padding(S(28));
-        for (var i = 0; i < heights.Length; i++)
-            _layout.RowStyles[i] = heights[i] == 0
+        for (var i = 0; i < RowHeights.Length; i++)
+            _layout.RowStyles[i] = RowHeights[i] == 0
                 ? new RowStyle(SizeType.Percent, 100)
-                : new RowStyle(SizeType.Absolute, S(heights[i]));
+                : new RowStyle(SizeType.Absolute, S(RowHeights[i]));
         _entry.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, S(110));
         _entry.ColumnStyles[2] = new ColumnStyle(SizeType.Absolute, S(120));
         _toolbar.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, S(160));
@@ -358,6 +377,74 @@ public sealed class TaskBoardForm : Form, IPuppet
         return success;
     }
 
+    [PuppetIgnore]
+    internal void RefreshPresence()
+    {
+        var firstVisibleLine = _presence.IsHandleCreated
+            ? SendMessage(_presence.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32()
+            : 0;
+        var puppets = PuppetRegistry.Query(includeInternal: true).Instances
+            .OrderBy(instance => instance.InstanceName, StringComparer.Ordinal)
+            .Select(instance => $"  {instance.InstanceName} ({instance.TypeName}) · {Loc.T("最近活跃", "last active")} {instance.LastActiveAt:HH:mm:ss}")
+            .ToList();
+        var now = DateTime.Now;
+        var agents = AgentBook.GetAll(includeStale: true)
+            .OrderBy(agent => agent.Id, StringComparer.Ordinal)
+            .ToList();
+
+        string FormatAgent(AgentInfo agent)
+        {
+            var idle = (int)Math.Max(0, (now - agent.LastHeartbeatAt).TotalSeconds);
+            var helpFlag = string.IsNullOrEmpty(agent.Help)
+                ? ""
+                : string.IsNullOrEmpty(agent.HelpTo)
+                    ? Loc.T("[求助] ", "[help] ")
+                    : Loc.T($"[求助→{agent.HelpTo}] ", $"[help→{agent.HelpTo}] ");
+            var flags = helpFlag + (idle > 60 ? Loc.T("[超过60秒未心跳] ", "[stale >60s] ") : "");
+            var line = $"  {flags}{agent.Id} · {agent.PuppetInstanceName}";
+            if (!string.IsNullOrEmpty(agent.CurrentSite)) line += $" · {Loc.T("站点", "site")} {agent.CurrentSite}";
+            if (!string.IsNullOrEmpty(agent.Operation)) line += $" · {agent.Operation}";
+            var status = agent.Status switch
+            {
+                Puppet.Core.AgentStatus.ShuttingDown => Loc.T("正在关闭", "shutting down"),
+                Puppet.Core.AgentStatus.Active => Loc.T("活跃", "active"),
+                _ => Loc.T("空闲", "idle")
+            };
+            line += $" · {idle}s · {status} · {AgentBook.DescribeReportedLock(agent.CurrentLockMode)}";
+            if (!string.IsNullOrEmpty(agent.Note)) line += Environment.NewLine + $"    {Loc.T("注意", "note")}：{agent.Note}";
+            if (!string.IsNullOrEmpty(agent.Help)) line += Environment.NewLine + $"    {Loc.T("求助", "help")}：{agent.Help}";
+            return line;
+        }
+
+        var helpAgents = agents.Where(agent => !string.IsNullOrEmpty(agent.Help)).Select(FormatAgent).ToList();
+        var otherAgents = agents.Where(agent => string.IsNullOrEmpty(agent.Help)).Select(FormatAgent).ToList();
+
+        var text = new StringBuilder();
+        text.AppendLine(Loc.T($"Puppet 注册 · {puppets.Count}", $"Puppet registrations · {puppets.Count}"));
+        if (puppets.Count == 0) text.AppendLine(Loc.T("  暂无注册实例。", "  No registered instances."));
+        else foreach (var puppet in puppets) text.AppendLine(puppet);
+        text.AppendLine(Loc.T($"求助 · {helpAgents.Count}", $"Help requests · {helpAgents.Count}"));
+        if (helpAgents.Count == 0) text.AppendLine(Loc.T("  暂无求助。", "  No help requests."));
+        else foreach (var agent in helpAgents) text.AppendLine(agent);
+        text.AppendLine(Loc.T($"Agent 状态 · {otherAgents.Count}", $"Agent status · {otherAgents.Count}"));
+        if (otherAgents.Count == 0) text.AppendLine(Loc.T("  暂无其他 Agent。", "  No other agents."));
+        else foreach (var agent in otherAgents) text.AppendLine(agent);
+
+        var value = text.ToString().TrimEnd();
+        if (_presence.Text == value) return;
+        _presence.Text = value;
+        if (firstVisibleLine > 0 && _presence.IsHandleCreated)
+            SendMessage(_presence.Handle, EmLineScroll, IntPtr.Zero,
+                (IntPtr)Math.Min(firstVisibleLine, Math.Max(0, _presence.Lines.Length - 1)));
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _presenceTimer.Stop();
+        _presenceTimer.Dispose();
+        base.OnFormClosed(e);
+    }
+
     protected override void OnShown(EventArgs e)
     {
         PuppetRegistry.Register(this);
@@ -385,6 +472,8 @@ public sealed class TaskBoardForm : Form, IPuppet
             }
         }
         else _agentStatus.Text = Loc.T("Puppet 已禁用 · 未提供 PUPPET_TESTGROUND_KEY", "Puppet disabled · no PUPPET_TESTGROUND_KEY");
+        RefreshPresence();
+        _presenceTimer.Start();
         base.OnShown(e);
     }
 

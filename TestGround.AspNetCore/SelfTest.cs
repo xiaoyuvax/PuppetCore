@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json.Nodes;
+using Puppet.Core;
 
 namespace TestGround.AspNetCore;
 
@@ -71,6 +72,7 @@ internal static class SelfTest
             var html = await page.Content.ReadAsStringAsync();
             Check(page.IsSuccessStatusCode && page.Content.Headers.ContentType?.MediaType == "text/html");
             Check(html.Contains("type=\"password\"") && html.Contains("/api/reservations") && !html.Contains(key, StringComparison.Ordinal));
+            Check(html.Contains("id=\"puppets\"") && html.Contains("id=\"agents\"") && html.Contains("/api/presence"));
             Check(page.Headers.CacheControl?.NoStore == true && page.Headers.Contains("Content-Security-Policy"));
         }
         Check((await Get(app, "/api/inventory"))["stock"]!.AsArray().Count == 0);
@@ -100,6 +102,19 @@ internal static class SelfTest
         Console.WriteLine("CHECK ordinary HTTP and Puppet share real business operations");
         var registry = await Get(agent, "/agent/registry");
         Check(registry["Instances"]!.AsArray().Any(i => i!["InstanceName"]!.GetValue<string>() == "Inventory"));
+        const string presenceAgent = "selftest-presence";
+        AgentBook.Heartbeat(presenceAgent, "verify presence", "/agent/invoke", 0, "Inventory", "Snapshot", LockMode.Write, "selftest note", "selftest help");
+        try
+        {
+            var presence = await Get(app, "/api/presence");
+            Check(presence["enabled"]!.GetValue<bool>());
+            Check(presence["puppets"]!.AsArray().Any(p => p!["instanceName"]!.GetValue<string>() == "Inventory"));
+            Check(presence["agents"]!.AsArray().Any(a => a!["id"]!.GetValue<string>() == presenceAgent
+                && a["status"]!.GetValue<string>() == "idle"
+                && a["note"]!.GetValue<string>() == "selftest note"
+                && a["seeksHelp"]!.GetValue<string>() == "selftest help"));
+        }
+        finally { AgentBook.Release(presenceAgent); }
         var description = await agent.GetStringAsync("/agent/describe?name=Inventory&format=json");
         Check(description.Contains("CreateStock") && description.Contains("Reserve") && description.Contains("Release") && !description.Contains(key, StringComparison.Ordinal));
         Check(description.Contains("CaptureAction"));

@@ -19,6 +19,12 @@
 <p class="hint" data-i18n="shotHint">Off by default. While it is on, this page answers a local capture request about once a second. Puppet cannot switch it on by itself.</p>
 </section>
 <div id="status" role="status" aria-live="polite"></div>
+<section class="card" aria-labelledby="puppet-title">
+<h2 id="puppet-title" data-i18n="puppetTitle">Puppet presence</h2>
+<p class="hint" data-i18n="puppetHint">Refreshes automatically as puppets register and agents act or ask for help.</p>
+<div class="scroll"><table><caption data-i18n="puppetCaption">Registered puppets</caption><thead><tr><th scope="col" data-i18n="thPuppet">Puppet</th><th scope="col" data-i18n="thType">Type</th><th scope="col" data-i18n="thLastActive">Last active</th></tr></thead><tbody id="puppets"></tbody></table></div>
+<div class="scroll" style="margin-top:14px"><table><caption data-i18n="agentCaption">Agents · status and help</caption><thead><tr><th scope="col" data-i18n="thAgent">Agent</th><th scope="col" data-i18n="thTarget">Target</th><th scope="col" data-i18n="thDoing">Doing</th><th scope="col" data-i18n="thIdle">Idle</th><th scope="col" data-i18n="thMessage">Note / help</th></tr></thead><tbody id="agents"></tbody></table></div>
+</section>
 <div class="grid">
 <section class="card"><h2 data-i18n="createTitle">Create stock</h2><form id="create"><label for="sku" data-i18n="sku">SKU</label><input id="sku" name="sku" required pattern="[A-Z0-9\-]{1,24}" maxlength="24" placeholder="NOTEBOOK-A5"><label for="name" data-i18n="itemName">Item name</label><input id="name" name="name" required maxlength="80" placeholder="A5 notebook"><label for="total" data-i18n="unitsReceived">Units received</label><input id="total" name="quantity" type="number" min="1" max="1000000" step="1" value="10" required><button data-i18n="createStock">Create stock</button></form></section>
 <section class="card"><h2 data-i18n="reserveTitle">Reserve units</h2><form id="reserve"><label for="reserve-sku" data-i18n="item">Item</label><select id="reserve-sku" name="sku" required><option value="" data-i18n="createFirst">Create stock first</option></select><label for="quantity" data-i18n="unitsToReserve">Units to reserve</label><input id="quantity" name="quantity" type="number" min="1" max="1000000" step="1" value="1" required><p class="hint" data-i18n="reserveHint">Only available units can be reserved. Release a reservation to return all of its units to availability.</p><button data-i18n="reserveUnits">Reserve units</button></form></section>
@@ -64,6 +70,27 @@ const I18N = {
     thUnits: 'Units',
     thAction: 'Action',
     footer: 'Changes are shared with Puppet on loopback port 19104. Restarting clears this workspace. No database, cookies, or browser storage.',
+    puppetTitle: 'Puppet presence',
+    puppetHint: 'Refreshes automatically as puppets register and agents act or ask for help.',
+    puppetCaption: 'Registered puppets',
+    thPuppet: 'Puppet',
+    thType: 'Type',
+    thLastActive: 'Last active',
+    agentCaption: 'Agents · status and help',
+    thAgent: 'Agent',
+    thTarget: 'Target',
+    thDoing: 'Doing',
+    thIdle: 'Idle',
+    thMessage: 'Note / help',
+    noPuppets: 'No puppet registered.',
+    noAgents: 'No agent connected.',
+    puppetDisabled: 'Puppet disabled: no runtime key.',
+    agentNote: 'note: ',
+    agentHelp: 'help: ',
+    secondsAgo: '{0}s ago',
+    statusActive: 'active',
+    statusIdle: 'idle',
+    statusShuttingDown: 'shutting down',
     msgEnterKey: 'Enter the runtime key before making changes.',
     msgRequestFailed: 'Request failed ({0}).',
     chooseItem: 'Choose an item',
@@ -115,6 +142,27 @@ const I18N = {
     thUnits: '数量',
     thAction: '操作',
     footer: '变更与回环端口 19104 上的 Puppet 共享。重启会清空本工作区。无数据库、无 Cookie、无浏览器存储。',
+    puppetTitle: 'Puppet 注册与求助',
+    puppetHint: 'Puppet 注册、Agent 操作或求助变化时会自动刷新。',
+    puppetCaption: '已注册的 Puppet',
+    thPuppet: 'Puppet',
+    thType: '类型',
+    thLastActive: '最近活跃',
+    agentCaption: 'Agent 状态与求助',
+    thAgent: 'Agent',
+    thTarget: '目标',
+    thDoing: '正在执行',
+    thIdle: '空闲',
+    thMessage: '注意 / 求助',
+    noPuppets: '暂无注册的 Puppet。',
+    noAgents: '暂无 Agent 接入。',
+    puppetDisabled: 'Puppet 已禁用：未提供运行时密钥。',
+    agentNote: '注意：',
+    agentHelp: '求助：',
+    secondsAgo: '{0} 秒前',
+    statusActive: '活跃',
+    statusIdle: '空闲',
+    statusShuttingDown: '正在关闭',
     msgEnterKey: '请先输入运行时密钥再进行变更。',
     msgRequestFailed: '请求失败（{0}）。',
     chooseItem: '选择物品',
@@ -185,6 +233,34 @@ async function refresh() {
   if (!data.stock.length) empty(stock, t('noStock'), 4);
   if (!data.reservations.length) empty(reservations, t('noReservations'), 3);
   document.querySelector('#stock-caption').textContent = t('inventoryCount', data.stock.length);
+}
+let presenceErrors = 0;
+async function refreshPresence() {
+  try {
+    const data = await request('/api/presence');
+    const puppets = document.querySelector('#puppets');
+    const agents = document.querySelector('#agents');
+    puppets.replaceChildren(); agents.replaceChildren();
+    for (const puppet of data.puppets) {
+      const row = puppets.insertRow();
+      cell(row, puppet.instanceName); cell(row, puppet.typeName); cell(row, puppet.lastActive);
+    }
+    for (const agent of data.agents) {
+      const row = agents.insertRow();
+      const target = agent.puppetInstanceName + (agent.currentSite ? ' · ' + agent.currentSite : '');
+      const doing = [agent.operation, agent.purpose].filter(Boolean).join(' · ');
+      const parts = [];
+      if (agent.note) parts.push(t('agentNote') + agent.note);
+      if (agent.seeksHelp) parts.push(t('agentHelp') + agent.seeksHelp);
+      const status = agent.status === 'active' ? t('statusActive') : agent.status === 'shutting down' ? t('statusShuttingDown') : t('statusIdle');
+      cell(row, agent.id); cell(row, target); cell(row, doing); cell(row, t('secondsAgo', agent.idleSeconds) + ' · ' + status); cell(row, parts.join(' · '));
+    }
+    if (!data.puppets.length) empty(puppets, t(data.enabled ? 'noPuppets' : 'puppetDisabled'), 3);
+    if (!data.agents.length) empty(agents, t('noAgents'), 5);
+    presenceErrors = 0;
+  } catch (error) {
+    if (presenceErrors++ === 0) message(error.message, true);
+  }
 }
 async function perform(button, action) { button.disabled = true; try { await action(); } catch (error) { message(error.message, true); } finally { button.disabled = false; } }
 document.querySelector('#access').onsubmit = event => {
@@ -270,6 +346,8 @@ document.querySelector('#allow-shot').onchange = event => {
 };
 window.addEventListener('pagehide', () => { shotAllowed = false; window.clearTimeout(shotTimer); runtimeKey = ''; document.querySelector('#key').value = ''; });
 refresh().catch(error => message(error.message, true));
+refreshPresence();
+window.setInterval(refreshPresence, 2000);
 </script>
 </body>
 </html>

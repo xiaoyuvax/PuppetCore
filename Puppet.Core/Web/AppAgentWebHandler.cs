@@ -26,17 +26,30 @@ namespace Puppet.Core.Web
         public static bool TryHandle(ref WebRequest req, AppAgent.AppAgentRuntime runtime)
         {
             if (runtime == null) return false;
-            var path = req.Path ?? "";                          // 小写化路由视图（端点分流，Wima 契约）
-            var pathCs = req.PathCaseSensitive ?? "";            // 原始大小写：action/state 契约名提取（manifest 逐字一致）
-
-            // Paranoid 开关（v0.5.4）：BlockAgentEndpoints 时 /agent/* 一律 404。
-            // 本处理器在扩展链中先于内建 /agent/* 执行，因此可拦截（UseAppAgent 应先于 UseFormControls 调用）。
+            var path = req.Path ?? "";
             if (runtime.Options.BlockAgentEndpoints && path.StartsWith("/agent", StringComparison.Ordinal)
                 && !path.StartsWith(PREFIX, StringComparison.Ordinal))
             {
                 req.Response.SetStatus404();
                 return true;
             }
+            if (!path.StartsWith(PREFIX, StringComparison.Ordinal)) return false;
+
+            // 与 A 面同一套多 Agent 协调语义：心跳 + 响应尾附同伴摘要 + agentDone 清理
+            PuppetWebHandler.NoteAgentCall(ref req, req.Queries?["name"]);
+            var handled = TryHandleCore(ref req, runtime);
+            if (handled)
+            {
+                PuppetWebHandler.FinishAgentCall(ref req);
+                PuppetWebHandler.EnsureUtf8JsonContentType(ref req);
+            }
+            return handled;
+        }
+
+        private static bool TryHandleCore(ref WebRequest req, AppAgent.AppAgentRuntime runtime)
+        {
+            var path = req.Path ?? "";                          // 小写化路由视图（端点分流，Wima 契约）
+            var pathCs = req.PathCaseSensitive ?? "";            // 原始大小写：action/state 契约名提取（manifest 逐字一致）
 
             if (!path.StartsWith(PREFIX, StringComparison.Ordinal)) return false;
 
@@ -283,8 +296,14 @@ namespace Puppet.Core.Web
 
 **产物下载**：action 响应携带 `asset` URL 时立即 `GET`（Bearer key）下载；TTL 默认 10 分钟，过期重跑 action。
 
-**多步原子序列**（先选中再操作）：请求可带 agentId/agentOp/site/lockMode 透传参数进入 AgentBook 心跳，
+**多步原子序列**（先选中再操作）：请求可带 agentId/agentPurpose/agentOp/agentWaitEst/site/lockMode/agentNote/agentHelp
+透传参数进入 AgentBook 心跳（未给 site 时按 `actions/<name>`、`state/<key>` 自动推断站点），
 并用 /agent/lock/acquire 建议性锁保护序列（协议与调试面向一致，manifest.concurrency 已声明串行语义）。
+
+**多 Agent 在场提示**：若存在其他 Agent，本接口的 JSON 响应会自动附带 `peers`（id/instance/site/doing/purpose/idleSeconds/lastActive/estimatedWaitSeconds/shuttingDown/lock/note/seeksHelp/summary）与 `peersHint`；
+数值字段名自解释可直接计算，语义用自然语言表达；不要依赖预定义枚举码（跨版本不保证含义一致）。
+详情用 `GET /agent/book`（全局密钥，含 `helpLog` 最近求助历史），锁状态用 `GET /agent/lock/status?site=*`（仅 A 面全局密钥）。
+需要其他 Agent 协助时在任意请求加 `agentHelp=<需求>`，定向加 `agentHelpTo=<agentId>`（空值广播）；对方会在 `seeksHelp`/`helpTo` 看到。完事带 `agentDone=true`（任意请求）或 `POST /agent/book/release` 清除自己在场状态。
 """;
     }
 

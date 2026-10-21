@@ -13,6 +13,47 @@ namespace TestGround.AspNetCore;
 
 internal static class Program
 {
+    private static object PresenceSnapshot(bool enabled)
+    {
+        var now = DateTime.Now;
+        return new
+        {
+            enabled,
+            puppets = PuppetRegistry.Query(includeInternal: true).Instances
+                .OrderBy(instance => instance.InstanceName, StringComparer.Ordinal)
+                .Select(instance => new
+                {
+                    instance.InstanceName,
+                    instance.TypeName,
+                    lastActive = instance.LastActiveAt.ToString("HH:mm:ss")
+                }),
+            agents = AgentBook.GetAll(includeStale: true)
+                .OrderByDescending(agent => !string.IsNullOrEmpty(agent.Help))
+                .ThenBy(agent => agent.Id, StringComparer.Ordinal)
+                .Select(agent => new
+                {
+                    agent.Id,
+                    agent.PuppetInstanceName,
+                    agent.CurrentSite,
+                    agent.Operation,
+                    agent.Purpose,
+                    idleSeconds = (int)Math.Max(0, (now - agent.LastHeartbeatAt).TotalSeconds),
+                    status = agent.Status switch
+                    {
+                        AgentStatus.ShuttingDown => "shutting down",
+                        AgentStatus.Active => "active",
+                        _ => "idle"
+                    },
+                    lastActive = agent.LastHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                    @lock = AgentBook.DescribeReportedLock(agent.CurrentLockMode),
+                    agent.Note,
+                    seeksHelp = string.IsNullOrEmpty(agent.Help) ? null : agent.Help,
+                    helpUpdatedAt = agent.HelpUpdatedAt,
+                    helpTo = string.IsNullOrEmpty(agent.HelpTo) ? null : agent.HelpTo
+                })
+        };
+    }
+
     private static async Task<int> Main(string[] args)
     {
         var key = Environment.GetEnvironmentVariable("PUPPET_TESTGROUND_KEY");
@@ -86,6 +127,7 @@ internal static class Program
             var html = await htmlReader.ReadToEndAsync();
             app.MapGet("/", () => Results.Content(html, "text/html; charset=utf-8"));
             app.MapGet("/api/inventory", (Inventory service) => service.Snapshot());
+            app.MapGet("/api/presence", () => Results.Json(PresenceSnapshot(agentEnabled)));
             app.MapPost("/api/stock", (CreateStockRequest input, Inventory service) =>
             {
                 var stock = service.CreateStock(input.Sku, input.Name, input.Quantity);
