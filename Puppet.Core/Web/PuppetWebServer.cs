@@ -29,25 +29,40 @@ namespace Puppet.Core.Web
             IsRunning = true;
         }
 
+        /// <summary>实际监听的端点（含端口）；未成功启动时为 null。</summary>
+        public string Endpoint { get; private set; }
+
         /// <summary>启动 Agent Web 服务器（默认端口 9090）。
+        /// 端口被占用时自动顺延到下一个可用端口（最多 <see cref="EndpointBinder.MaxAttempts"/> 个），
+        /// 实际地址见 <see cref="Endpoint"/>；重复调用会先停掉上一次监听。
         /// 已 UseAppAgent 时启动成功后写发现档案（endpoint 含实际端口）。</summary>
         /// <param name="listenEp">监听端点，如 "0.0.0.0:9090"</param>
-        /// <returns>是否启动成功</returns>
+        /// <returns>是否启动成功（含端口顺延；全部端口被占用返回 false）</returns>
         public bool Start(string listenEp = DEFAULT_ENDPOINT)
         {
-            var ok = StartWebEngine(listenEp, Wima.Web.WebEngine.Kestrel, reuseAddress: true);
-            if (ok && _appAgentRuntime != null)
+            if (Endpoint != null) Stop();
+
+            string actual = EndpointBinder.FindFree(listenEp);
+            if (actual == null)
             {
-                var idx = listenEp?.LastIndexOf(':') ?? -1;
-                var portStr = idx >= 0 ? listenEp[(idx + 1)..] : null;
-                _appAgentRuntime.Bind(int.TryParse(portStr, out var p) ? p : 9090);
+                Endpoint = null;
+                LogMan.Warn($"Puppet 启动失败：{listenEp} 起连续 {EndpointBinder.MaxAttempts} 个端口均被占用。");
+                return false;
             }
+            if (!string.Equals(actual, listenEp, StringComparison.Ordinal))
+                LogMan.Warn($"Puppet 监听端口被占用，改用 {actual}（配置：{listenEp}）。");
+
+            var ok = StartWebEngine(actual, Wima.Web.WebEngine.Kestrel, reuseAddress: true);
+            Endpoint = ok ? actual : null;
+            if (ok && _appAgentRuntime != null)
+                _appAgentRuntime.Bind(EndpointBinder.TryParse(actual, out _, out var port) ? port : 9090);
             return ok;
         }
 
         /// <summary>停止 Agent Web 服务器（清理发现档案）</summary>
         public void Stop()
         {
+            Endpoint = null;
             _appAgentRuntime?.Unbind();
             StopWebEngine(dispose: true);
         }

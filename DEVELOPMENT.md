@@ -75,6 +75,8 @@ PuppetKeyVault.SetKey("your-secret");
 new PuppetWebServer().Start("0.0.0.0:9090");
 ```
 
+**端口冲突自动顺延**：`Start` 先独占试绑目标端口，被占用就顺延到下一个（最多 10 个）；实际监听地址读 `server.Endpoint`，全部被占用返回 `false`。重复调用 `Start` 会先停掉上一次监听。外部工具以实际端口为准（`/appagent/*` 发现档案记录的是真实 endpoint）。
+
 WinForm 宿主需 `/agent/control` 控件端点时，用 WinForms 包扩展挂接：
 
 ```csharp
