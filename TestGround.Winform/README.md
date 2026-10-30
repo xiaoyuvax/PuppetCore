@@ -21,7 +21,7 @@ dotnet build TestGround.Winform.csproj -c Release
 
 使用 `/agent/invoke?name=TaskBoard&method=AddTask`，JSON 数组正文传参；共享操作为 `AddTask(title, priority)`（priority 可选：普通/高）、`SelectTask(index)`（当前可见列表的零基下标）、`CompleteSelectedTask()`、`RemoveSelectedTask()`、`RenameSelectedTask(title)`、`ToggleSelectedPriority()`、`ClearCompletedTasks()`（返回清除数量）、`SetFilter(filter)`（全部/待办/已完成）。返回 bool（ClearCompletedTasks 返回 int），错误说明见 `StatusText`。
 
-底部“Puppet 注册”面板每秒刷新：列出 `PuppetRegistry` 中已注册实例，以及 `AgentBook` 中每个 Agent 的实例、站点、正在执行的操作、状态、空闲秒数、锁、注意与求助内容。带求助的 Agent 置顶到“求助”分区并标 `[求助]`（定向标 `[求助→目标]`），超过 60 秒未心跳标 `[超过60秒未心跳]`；其余在“Agent 状态”分区。锁文案为 “reports holding …”，表示 Agent 自报，实际锁以 `/agent/lock/status` 为准。面板按 Agent ID 稳定排序，刷新时保留当前滚动位置，可直接滚动阅读多行求助。
+底部“Puppet 注册”面板每秒刷新：列出 `PuppetRegistry` 中已注册实例，以及 `AgentBook` 中每个 Agent 的实例、站点、正在执行的操作、状态、空闲秒数、锁、注意与对话内容。带对话的 Agent 置顶到“对话”分区并标 `[对话]`（定向标 `[对话→目标]`），超过 60 秒未心跳标 `[超过60秒未心跳]`；其余在“Agent 状态”分区。锁文案为 “reports holding …”，表示 Agent 自报，实际锁以 `/agent/lock/status` 为准。面板按 Agent ID 稳定排序，刷新时保留当前滚动位置，可直接滚动阅读多行对话。
 
 观察用 `/agent/get?name=TaskBoard&path=TotalCount` 等单属性；支持 `PendingCount`、`CompletedCount`、`HighPriorityPendingCount`、`VisibleCount`、`SelectedTitle`、`SelectedCompleted`、`SelectedPriority`、`SelectedCreatedAt`、`CurrentFilter`、`StatusText`、`AgentStatus`、`PresenceText`。不要序列化整个 Form。`/agent/control` 支持命名控件（含 TaskPriority、RenameButton、PriorityButton、ClearDoneButton）；ListBox 选择使用共享 `SelectTask`，现有框架未实现 ListBox select 控件动作。
 

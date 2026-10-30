@@ -29,7 +29,7 @@ namespace Puppet.Core.Web
             "GET  /agent/registry", "GET  /agent/capabilities", "GET  /agent/docs", "GET  /agent/usage",
             "GET  /agent/hints", "GET  /agent/logs", "GET  /agent/describe", "GET  /agent/state",
             "GET  /agent/get", "POST /agent/set", "POST /agent/invoke", "POST /agent/key/refresh",
-            "GET/POST /agent/book*", "GET/POST /agent/lock*", "/appagent/*"
+            "GET  /agent/chat", "GET/POST /agent/book*", "GET/POST /agent/lock*", "/appagent/*"
         };
 
         /// <summary>尝试处理 /agent/* 与 /mcp 请求。返回 true 表示已处理。</summary>
@@ -184,6 +184,10 @@ namespace Puppet.Core.Web
             // AgentBook 端点（仅全局密钥）
             if (req.Path.StartsWith("/agent/book") && PuppetKeyVault.AuthorizeGlobal(key))
                 return HandleAgentBook(ref req);
+
+            // 对话历史（仅全局密钥）
+            if (req.Path == "/agent/chat" && req.Method == "GET" && PuppetKeyVault.AuthorizeGlobal(key))
+                return HandleChat(ref req);
 
             // SiteLock 端点（仅全局密钥）
             if (req.Path.StartsWith("/agent/lock") && PuppetKeyVault.AuthorizeGlobal(key))
@@ -376,13 +380,15 @@ namespace Puppet.Core.Web
 
             AgentBook.Heartbeat(agentId, req.Queries?["agentPurpose"] ?? "",
                 operation, ParseInt(req.Queries?["agentWaitEst"], 0),
-                instanceName ?? "unknown", site, lockMode, req.Queries?["agentNote"], req.Queries?["agentHelp"],
-                req.Queries?["agentHelpTo"] ?? req.Queries?["helpTo"]);
+                instanceName ?? "unknown", site, lockMode, req.Queries?["agentNote"],
+                req.Queries?["agentSay"] ?? req.Queries?["agentHelp"],
+                req.Queries?["agentSayTo"] ?? req.Queries?["agentHelpTo"] ?? req.Queries?["helpTo"]);
         }
 
         /// <summary>只读协调/轮询端点：未显式提供 agentOp 时保留上一次真实操作，避免 doing 被轮询覆盖。</summary>
         private static bool IsCoordinationPath(string path) => path is
             "/agent/book" or "/agent/book/heartbeat" or "/agent/book/release" or
+            "/agent/chat" or
             "/agent/lock/status" or "/agent/registry" or "/agent/usage" or "/agent/hints" or
             "/agent/logs" or "/agent/capabilities" or "/agent/probe" or
             "/appagent/probe" or "/appagent/manifest";
@@ -397,10 +403,10 @@ namespace Puppet.Core.Web
                 req.Response.Headers.Set("Content-Type", contentType + "; charset=utf-8");
         }
 
-        /// <summary>响应收尾：附加在场同伴，并处理 agentDone（本次即最后一次调用）。</summary>
+        /// <summary>响应收尾：附加在场同伴与对话概况，并处理 agentDone（本次即最后一次调用）。</summary>
         internal static void FinishAgentCall(ref WebRequest req)
         {
-            AnnotatePeers(ref req);
+            AnnotatePresence(ref req);
             var selfId = req.Queries?["agentId"];
             if (!string.IsNullOrEmpty(selfId) && req.Queries?["agentDone"] is "1" or "true")
                 AgentBook.Release(selfId);
@@ -409,24 +415,30 @@ namespace Puppet.Core.Web
         /// <summary>同伴提示文案（附在每个含同伴的回复里，告诉 Agent 下一步查什么）。</summary>
         private const string PeerHint =
             "Other agents are active. Use idleSeconds to judge liveness (large = possibly dropped). " +
-            "Coordinating APIs: GET /agent/book (full sessions + notes + helpLog), GET /agent/lock/status?site=* (locks), " +
+            "Coordinating APIs: GET /agent/book (full sessions + notes), GET /agent/lock/status?site=* (locks), " +
             "POST /agent/lock/acquire {site,mode} before touching a shared site. " +
-            "Need help or want to invite collaboration? Add ?agentHelp=<what you need> to any call; add ?agentHelpTo=<agentId> to target one peer, or agentHelpTo= to broadcast. " +
-            "Peers see it as seeksHelp until you clear it with agentHelp=. " +
+            "Talk to them: add ?agentSay=<your message> to any call; add ?agentSayTo=<agentId> to target one peer, or omit to broadcast. " +
+            "Peers see it as lastMessage and the shared log at /agent/chat. " +
             "When done: call any endpoint with agentDone=true (or POST /agent/book/release {id}) so others stop seeing you.";
+
+        /// <summary>对话概况提示（随每个响应返回，指向查询端点）。</summary>
+        private const string ChatHint =
+            "Conversation is kept in memory for this app run. GET /agent/chat?tail=20 reads the last 20; " +
+            "filter with &q=<keyword>, &since=<yyyy-MM-dd HH:mm:ss>, &until=<...>, &from=<agentId>, &to=<agentId>; tail=0 returns all. " +
+            "Send with agentSay=<text> (alias agentHelp), optionally agentSayTo=<agentId>.";
 
         /// <summary>单个同伴视图：数值字段名自解释（idleSeconds/estimatedWaitSeconds），状态语义用自然语言表达。</summary>
         private sealed record PeerView(string Id, string Instance, string Site, string Doing, string Purpose,
             int IdleSeconds, string LastActive, int EstimatedWaitSeconds, bool ShuttingDown,
-            string Lock, string Note, string SeeksHelp, DateTime? HelpUpdatedAt, string HelpTo, string Summary);
+            string Lock, string Note, string LastMessage, DateTime? LastMessageAt, string MessageTo, string Summary);
 
         private static PeerView ToPeerView(AgentInfo a, DateTime now)
         {
             var idle = (int)Math.Max(0, (now - a.LastHeartbeatAt).TotalSeconds);
             var lockText = AgentBook.DescribeReportedLock(a.CurrentLockMode);
             var note = string.IsNullOrEmpty(a.Note) ? null : a.Note;
-            var help = string.IsNullOrEmpty(a.Help) ? null : a.Help;
-            var helpTo = string.IsNullOrEmpty(a.HelpTo) ? null : a.HelpTo;
+            var message = string.IsNullOrEmpty(a.LastMessage) ? null : a.LastMessage;
+            var messageTo = string.IsNullOrEmpty(a.MessageTo) ? null : a.MessageTo;
             var shuttingDown = a.Status == AgentStatus.ShuttingDown;
 
             var parts = new List<string> { $"{a.Id} is on instance {a.PuppetInstanceName}" };
@@ -438,17 +450,36 @@ namespace Puppet.Core.Web
             parts.Add(lockText);
             if (shuttingDown) parts.Add("is shutting down");
             if (note != null) parts.Add($"note: {note}");
-            if (help != null) parts.Add(helpTo != null ? $"seeks help from {helpTo}: {help}" : $"seeks help: {help}");
+            if (message != null) parts.Add(messageTo != null ? $"last said to {messageTo}: {message}" : $"last said: {message}");
 
             return new PeerView(a.Id, a.PuppetInstanceName, a.CurrentSite, a.Operation, a.Purpose,
                 idle, a.LastHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss"), a.EstimatedWaitSeconds, shuttingDown,
-                lockText, note, help, a.HelpUpdatedAt, helpTo, string.Join("; ", parts));
+                lockText, note, message, a.LastMessageAt, messageTo, string.Join("; ", parts));
         }
 
-        /// <summary>把在场同伴（排除自己）的简要信息附加到响应；无同伴则不动响应体。</summary>
-        internal static void AnnotatePeers(ref WebRequest req)
+        /// <summary>对话概况（最后一条 + 计数/时间概况），供各响应与 /agent/book 复用。</summary>
+        private static JObject ToChatJson(ChatOverview chat) => chat.Last == null ? null : new JObject
+        {
+            ["messages"] = chat.Messages,
+            ["agents"] = chat.Agents,
+            ["firstAt"] = chat.FirstAt,
+            ["lastAt"] = chat.LastAt,
+            ["last"] = new JObject
+            {
+                ["seq"] = chat.Last.Seq,
+                ["agentId"] = chat.Last.AgentId,
+                ["text"] = chat.Last.Text,
+                ["to"] = chat.Last.To,
+                ["at"] = chat.Last.At
+            },
+            ["summary"] = chat.Summary
+        };
+
+        /// <summary>把在场同伴（排除自己）与对话概况附加到响应；两者都没有则不动响应体。</summary>
+        internal static void AnnotatePresence(ref WebRequest req)
         {
             if (req.Response.StatusCode >= 400) return;   // 错误/未认证响应不披露其他会话
+            if (req.Path == "/agent/chat") return;         // 查询端点自带完整历史
             var ct = req.Response.Headers?.Get("Content-Type") ?? "";
             if (ct.Length > 0 && !ct.Contains("json") && !ct.Contains("text") && !ct.Contains("markdown"))
                 return;                                    // 二进制产物（如 /appagent/assets/*）绝不改写
@@ -460,7 +491,8 @@ namespace Puppet.Core.Web
                 .OrderByDescending(a => a.LastHeartbeatAt)
                 .Select(a => ToPeerView(a, now))
                 .ToArray();
-            if (peers.Length == 0) return;
+            var chat = AgentBook.GetChatOverview();
+            if (peers.Length == 0 && chat.Last == null) return;
             if (req.Response.Buffer is not { Length: > 0 } raw) return;
 
             var hint = string.IsNullOrEmpty(selfId)
@@ -468,31 +500,43 @@ namespace Puppet.Core.Web
                 : PeerHint;
             var text = Encoding.UTF8.GetString(raw);
             var trimmed = text.TrimStart();
-            // JSON 对象：加 peers / peersHint 字段（保持原形状）
+            // JSON 对象：加 peers / chat 字段（保持原形状）
             if (trimmed.StartsWith("{", StringComparison.Ordinal))
             {
                 try
                 {
                     var obj = JObject.Parse(text);
-                    obj["peers"] = new JArray(peers.Select(p => new JObject
+                    if (peers.Length > 0)
                     {
-                        ["id"] = p.Id,
-                        ["instance"] = p.Instance,
-                        ["site"] = p.Site,
-                        ["doing"] = p.Doing,
-                        ["purpose"] = p.Purpose,
-                        ["idleSeconds"] = p.IdleSeconds,
-                        ["lastActive"] = p.LastActive,
-                        ["estimatedWaitSeconds"] = p.EstimatedWaitSeconds,
-                        ["shuttingDown"] = p.ShuttingDown,
-                        ["lock"] = p.Lock,
-                        ["note"] = p.Note,
-                        ["seeksHelp"] = p.SeeksHelp,
-                        ["helpUpdatedAt"] = p.HelpUpdatedAt,
-                        ["helpTo"] = p.HelpTo,
-                        ["summary"] = p.Summary
-                    }));
-                    obj["peersHint"] = hint;
+                        obj["peers"] = new JArray(peers.Select(p => new JObject
+                        {
+                            ["id"] = p.Id,
+                            ["instance"] = p.Instance,
+                            ["site"] = p.Site,
+                            ["doing"] = p.Doing,
+                            ["purpose"] = p.Purpose,
+                            ["idleSeconds"] = p.IdleSeconds,
+                            ["lastActive"] = p.LastActive,
+                            ["estimatedWaitSeconds"] = p.EstimatedWaitSeconds,
+                            ["shuttingDown"] = p.ShuttingDown,
+                            ["lock"] = p.Lock,
+                            ["note"] = p.Note,
+                            ["lastMessage"] = p.LastMessage,
+                            ["lastMessageAt"] = p.LastMessageAt,
+                            ["messageTo"] = p.MessageTo,
+                            ["summary"] = p.Summary,
+                            // 旧字段保留以兼容旧调用方，均等价于 lastMessage
+                            ["seeksHelp"] = p.LastMessage,
+                            ["helpUpdatedAt"] = p.LastMessageAt,
+                            ["helpTo"] = p.MessageTo
+                        }));
+                        obj["peersHint"] = hint;
+                    }
+                    if (chat.Last != null)
+                    {
+                        obj["chat"] = ToChatJson(chat);
+                        obj["chatHint"] = ChatHint;
+                    }
                     req.Response.Buffer = Encoding.UTF8.GetBytes(obj.ToString(Formatting.None));
                     return;
                 }
@@ -503,10 +547,19 @@ namespace Puppet.Core.Web
 
             // Markdown / 纯文本响应：追加可读区块（describe?format=md、/agent/docs、/agent/logs）
             var sb = new StringBuilder(text);
-            sb.AppendLine().AppendLine().AppendLine("---").AppendLine("### Other agents active on this puppet");
-            foreach (var p in peers)
-                sb.Append("- ").AppendLine(p.Summary);
-            sb.AppendLine().Append(hint);
+            if (peers.Length > 0)
+            {
+                sb.AppendLine().AppendLine().AppendLine("---").AppendLine("### Other agents active on this puppet");
+                foreach (var p in peers)
+                    sb.Append("- ").AppendLine(p.Summary);
+                sb.AppendLine().Append(hint);
+            }
+            if (chat.Last != null)
+            {
+                sb.AppendLine().AppendLine("---").AppendLine("### Conversation").AppendLine(chat.Summary);
+                sb.Append("- last from ").Append(chat.Last.AgentId).Append(": ").AppendLine(chat.Last.Text);
+                sb.AppendLine(ChatHint);
+            }
             req.Response.Buffer = Encoding.UTF8.GetBytes(sb.ToString());
         }
 
@@ -525,17 +578,22 @@ namespace Puppet.Core.Web
                     shuttingDown = a.Status == AgentStatus.ShuttingDown,
                     @lock = AgentBook.DescribeReportedLock(a.CurrentLockMode),
                     a.Note,
-                    seeksHelp = string.IsNullOrEmpty(a.Help) ? null : a.Help,
-                    helpUpdatedAt = a.HelpUpdatedAt,
-                    helpTo = string.IsNullOrEmpty(a.HelpTo) ? null : a.HelpTo,
-                    // 旧字段保留以兼容既有调用方；新调用方请使用上面的自解释字段（跨版本更稳）
+                    lastMessage = string.IsNullOrEmpty(a.LastMessage) ? null : a.LastMessage,
+                    lastMessageAt = a.LastMessageAt,
+                    messageTo = string.IsNullOrEmpty(a.MessageTo) ? null : a.MessageTo,
+                    // 旧字段保留以兼容既有调用方，等价于 lastMessage
+                    seeksHelp = string.IsNullOrEmpty(a.LastMessage) ? null : a.LastMessage,
+                    helpUpdatedAt = a.LastMessageAt,
+                    helpTo = string.IsNullOrEmpty(a.MessageTo) ? null : a.MessageTo,
+                    // 旧枚举字段保留以兼容既有调用方；新调用方请使用上面的自解释字段
                     a.Status, a.CurrentLockMode, a.RegisteredAt, a.LastHeartbeatAt
                 });
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
                 {
                     ok = true,
                     agents,
-                    helpLog = AgentBook.GetHelpLog()
+                    chat = ToChatJson(AgentBook.GetChatOverview()),
+                    chatHint = ChatHint
                 }));
                 req.Response.SetJsonContent();
                 return true;
@@ -550,8 +608,8 @@ namespace Puppet.Core.Web
                 var wait = ParseInt(body?["waitEst"]?.ToString(), 0);
                 var site = body?["site"]?.ToString();
                 var note = body?["note"]?.ToString();
-                var help = body?["help"]?.ToString();
-                var helpTo = body?["helpTo"]?.ToString() ?? body?["agentHelpTo"]?.ToString();
+                var message = body?["say"]?.ToString() ?? body?["message"]?.ToString() ?? body?["help"]?.ToString();
+                var messageTo = body?["sayTo"]?.ToString() ?? body?["messageTo"]?.ToString() ?? body?["helpTo"]?.ToString() ?? body?["agentHelpTo"]?.ToString();
                 var lmStr = body?["lockMode"]?.ToString();
                 LockMode lm = LockMode.None;
                 if (!string.IsNullOrEmpty(lmStr)) Enum.TryParse(lmStr, true, out lm);
@@ -559,7 +617,7 @@ namespace Puppet.Core.Web
                 if (!string.IsNullOrEmpty(id))
                 {
                     req.Queries["agentId"] = id;
-                    AgentBook.Heartbeat(id, purp, op, wait, "unknown", site, lm, note, help, helpTo);
+                    AgentBook.Heartbeat(id, purp, op, wait, "unknown", site, lm, note, message, messageTo);
                 }
 
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true }));
@@ -587,6 +645,47 @@ namespace Puppet.Core.Web
             }
 
             return false;
+        }
+
+        /// <summary>对话历史查询：tail / since / until / q / from / to 过滤，结果按时间正序。</summary>
+        private static bool HandleChat(ref WebRequest req)
+        {
+            if (!TryParseTime(req.Queries?["since"], out var since))
+            {
+                AppAgentWebHandler.WriteError(req, 400, "invalid-time", $"since '{req.Queries?["since"]}' is not a date/time",
+                    "use yyyy-MM-dd HH:mm:ss or ISO 8601, or drop since");
+                return true;
+            }
+            if (!TryParseTime(req.Queries?["until"], out var until))
+            {
+                AppAgentWebHandler.WriteError(req, 400, "invalid-time", $"until '{req.Queries?["until"]}' is not a date/time",
+                    "use yyyy-MM-dd HH:mm:ss or ISO 8601, or drop until");
+                return true;
+            }
+
+            var tail = ParseInt(req.Queries?["tail"], 20);
+            if (tail < 0) tail = 0;
+
+            var matched = AgentBook.GetChat(since, until, req.Queries?["q"], req.Queries?["from"], req.Queries?["to"]);
+            var shown = tail > 0 && matched.Count > tail ? matched.GetRange(matched.Count - tail, tail) : matched;
+            req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new
+            {
+                ok = true,
+                total = matched.Count,
+                returned = shown.Count,
+                messages = shown.Select(m => new { seq = m.Seq, agentId = m.AgentId, text = m.Text, to = m.To, at = m.At })
+            }));
+            req.Response.SetJsonContent();
+            return true;
+        }
+
+        private static bool TryParseTime(string text, out DateTime? value)
+        {
+            value = null;
+            if (string.IsNullOrEmpty(text)) return true;
+            if (!DateTime.TryParse(text, out var parsed)) return false;
+            value = parsed;
+            return true;
         }
 
         private static bool HandleSiteLock(ref WebRequest req)

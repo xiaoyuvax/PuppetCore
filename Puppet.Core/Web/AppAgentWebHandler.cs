@@ -296,14 +296,15 @@ namespace Puppet.Core.Web
 
 **产物下载**：action 响应携带 `asset` URL 时立即 `GET`（Bearer key）下载；TTL 默认 10 分钟，过期重跑 action。
 
-**多步原子序列**（先选中再操作）：请求可带 agentId/agentPurpose/agentOp/agentWaitEst/site/lockMode/agentNote/agentHelp
+**多步原子序列**（先选中再操作）：请求可带 agentId/agentPurpose/agentOp/agentWaitEst/site/lockMode/agentNote/agentSay
 透传参数进入 AgentBook 心跳（未给 site 时按 `actions/<name>`、`state/<key>` 自动推断站点），
 并用 /agent/lock/acquire 建议性锁保护序列（协议与调试面向一致，manifest.concurrency 已声明串行语义）。
 
-**多 Agent 在场提示**：若存在其他 Agent，本接口的 JSON 响应会自动附带 `peers`（id/instance/site/doing/purpose/idleSeconds/lastActive/estimatedWaitSeconds/shuttingDown/lock/note/seeksHelp/summary）与 `peersHint`；
+**多 Agent 在场提示**：若存在其他 Agent，本接口的 JSON 响应会自动附带 `peers`（id/instance/site/doing/purpose/idleSeconds/lastActive/estimatedWaitSeconds/shuttingDown/lock/note/lastMessage/lastMessageAt/messageTo/summary）与 `peersHint`；
 数值字段名自解释可直接计算，语义用自然语言表达；不要依赖预定义枚举码（跨版本不保证含义一致）。
-详情用 `GET /agent/book`（全局密钥，含 `helpLog` 最近求助历史），锁状态用 `GET /agent/lock/status?site=*`（仅 A 面全局密钥）。
-需要其他 Agent 协助时在任意请求加 `agentHelp=<需求>`，定向加 `agentHelpTo=<agentId>`（空值广播）；对方会在 `seeksHelp`/`helpTo` 看到。完事带 `agentDone=true`（任意请求）或 `POST /agent/book/release` 清除自己在场状态。
+每个响应另附 `chat`（对话概况：messages/agents/firstAt/lastAt/last/summary）与 `chatHint`；完整历史用 `GET /agent/chat?tail=20`（仅 A 面全局密钥），可加 `&q=<关键字>`、`&since=`、`&until=`、`&from=<agentId>`、`&to=<agentId>`，`tail=0` 返回全部。
+详情用 `GET /agent/book`（全局密钥，含完整会话与对话概况），锁状态用 `GET /agent/lock/status?site=*`（仅 A 面全局密钥）。
+对话：在任意请求加 `agentSay=<内容>`（旧名 `agentHelp`），定向加 `agentSayTo=<agentId>`（空值广播）；对方会在 `lastMessage`/`messageTo` 看到。完事带 `agentDone=true`（任意请求）或 `POST /agent/book/release` 清除自己在场状态。
 """;
     }
 

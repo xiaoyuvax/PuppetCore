@@ -125,9 +125,10 @@ JSON 响应统一带 `Content-Type: application/json; charset=utf-8`（A 面 `/a
 
 | 端点                       | 方法   | 说明                                                                    |
 | ----------------------- | ---- | --------------------------------------------------------------------- |
-| `/agent/book`           | GET  | 查询所有 Agent 状态（`includeStale=true` 包含超时未心跳者）；响应另含 `helpLog`（最近 20 条去重求助） |
-| `/agent/book/heartbeat` | POST | 显式心跳，Body: `{id, purpose?, op?, waitEst?, site?, lockMode?, note?, help?, helpTo?}` |
+| `/agent/book`           | GET  | 查询所有 Agent 状态（`includeStale=true` 包含超时未心跳者）；响应另含 `chat`（对话概况：条数、参与人数、首末时间、最后一条） |
+| `/agent/book/heartbeat` | POST | 显式心跳，Body: `{id, purpose?, op?, waitEst?, site?, lockMode?, note?, say?, sayTo?}`（`help`/`helpTo` 为旧名别名） |
 | `/agent/book/release`   | POST | 正常关闭前检查/等待，Body: `{id, waitForOthers?, timeoutSec?}` → `{canShutdown}` |
+| `/agent/chat`           | GET  | 本次应用启动以来的对话历史；`tail=N`（默认 20，0=全部）、`since`/`until`（`yyyy-MM-dd HH:mm:ss` 或 ISO）、`q=<关键字>`、`from=<agentId>`、`to=<agentId>` |
 | `/agent/lock/acquire`   | POST | 获取建议性锁，Body: `{site, mode:"Read|Write", timeoutMs?, agentId?}`    |
 | `/agent/lock/release`   | POST | 释放锁，Body: `{site, agentId?}`                                         |
 | `/agent/lock/status`    | GET  | 查询锁状态，`?site=*` 返回全部，`?site=Form1.btnSave` 返回单个；每条含自然语言 `lock`，单个响应另含 `lockText`（数字 `Mode` 仅向后兼容） |
@@ -162,13 +163,13 @@ JSON 响应统一带 `Content-Type: application/json; charset=utf-8`（A 面 `/a
 | `site` | string | 操作站点路径（如 `"Form1.txtName.Text"`、`"Form1.*"`、`"*"` 整实例） |
 | `lockMode` | string | `"Read"`/`"Write"`/`"None"` |
 | `agentNote` | string | 给其他 Agent 的注意事项（如「不要关闭宿主」「不要操作某 site」）；`agentNote=`（空值）清除 |
-| `agentHelp` | string | 向其他 Agent 求助/邀请协作（自由文本，如「需要人核对保存对话框」）；`agentHelp=`（空值）清除 |
-| `agentHelpTo` | string | 求助目标 Agent Id；省略 = 保留原目标，`agentHelpTo=`（空值）= 广播。仅与 `agentHelp` 一起生效 |
+| `agentSay` | string | 对话内容（自由文本，任意内容）；`agentSay=`（空值）清除自己最后一条。旧名 `agentHelp` 仍可用 |
+| `agentSayTo` | string | 对话目标 Agent Id；省略 = 保留原目标，`agentSayTo=`（空值）= 广播。旧名 `agentHelpTo` 仍可用 |
 | `agentDone` | bool | `true` 表示本次是最后一次调用，响应后立即将从 AgentBook 移除（`1` 亦兼容） |
 
 > 每次调用自动更新 AgentBook 心跳，无需额外请求。
 >
-> **在场同伴自动提示**：只要 AgentBook 里存在其他 Agent，`/agent/*`（以及 `/appagent/*`）的每个响应都会附带同伴摘要（JSON 对象响应加 `peers` / `peersHint` 字段；Markdown/文本响应追加同内容区块）。每个同伴含：`id`、`instance`、`site`、`doing`、`purpose`、`idleSeconds`、`lastActive`、`estimatedWaitSeconds`、`shuttingDown`、`lock`、`note`、`seeksHelp`、`helpUpdatedAt`、`helpTo`，外加一句话 `summary`（自然语言）。无同伴时响应不变。想进一步了解详情或判断是否互相干扰：`GET /agent/book`（完整会话、注意事项与 `helpLog` 最近求助历史）、`GET /agent/lock/status?site=*`（已持有的锁，含自然语言 `lock`）、必要时先 `POST /agent/lock/acquire`。`lock` 是 Agent **自报**的锁状态（文案为 “reports holding …”），可能与 SiteLock 实际持有状态不同；以 `/agent/lock/status` 为准。需要其他 Agent 协助时在任意请求加 `agentHelp=<需求>`，定向加 `agentHelpTo=<agentId>`；对方会在 `seeksHelp`/`helpTo` 看到，`helpLog` 保留最近 20 条去重求助。完事用 `agentDone=true` 或 `POST /agent/book/release` 清除自己在场状态（`agentHelp` 随之消失）。`/agent/book`、`/agent/lock/status`、`/agent/registry` 等协调/轮询端点未显式给 `agentOp` 时保留上一次真实操作，不会把 `doing` 覆盖成轮询路径（显式 `agentOp` 仍优先）。
+> **在场同伴自动提示**：AgentBook 里存在其他 Agent 或对话历史时，`/agent/*`（以及 `/appagent/*`）的每个响应都会附带摘要（JSON 对象响应加 `peers` / `peersHint` / `chat` / `chatHint` 字段；Markdown/文本响应追加同内容区块）。每个同伴含：`id`、`instance`、`site`、`doing`、`purpose`、`idleSeconds`、`lastActive`、`estimatedWaitSeconds`、`shuttingDown`、`lock`、`note`、`lastMessage`、`lastMessageAt`、`messageTo`，外加一句话 `summary`（自然语言）；`chat` 只给概况：`messages`、`agents`、`firstAt`、`lastAt`、`last`（最后一条：`seq`/`agentId`/`text`/`to`/`at`）、`summary`。无同伴且无对话时响应不变。想进一步了解详情：`GET /agent/book`（完整会话、注意事项与对话概况）、`GET /agent/chat`（按 `tail`/时间/关键字/收发方查询历史）、`GET /agent/lock/status?site=*`（已持有的锁，含自然语言 `lock`）、必要时先 `POST /agent/lock/acquire`。`lock` 是 Agent **自报**的锁状态（文案为 “reports holding …”），可能与 SiteLock 实际持有状态不同；以 `/agent/lock/status` 为准。对话用任意请求的 `agentSay=<内容>`（可加 `agentSayTo=<agentId>` 定向）；对方会在 `lastMessage`/`messageTo` 看到，历史保留到本次应用退出（内存上限 500 条）。完事用 `agentDone=true` 或 `POST /agent/book/release` 清除自己在场状态（对话历史仍保留）。`/agent/book`、`/agent/chat`、`/agent/lock/status`、`/agent/registry` 等协调/轮询端点未显式给 `agentOp` 时保留上一次真实操作，不会把 `doing` 覆盖成轮询路径（显式 `agentOp` 仍优先）。
 >
 > **跨版本互通原则（自然语言 + 数学）**：同伴信息里允许数值字段，但字段名必须自解释、可由对方直接计算（如 `idleSeconds`、`estimatedWaitSeconds`）；状态语义用自然语言句子表达（如 `lock: "holds a write lock"`、`summary`）。**禁止**把预定义枚举/数字码当作跨版本契约（如 `status: 1` 表示 Active、`lockMode: 2` 表示 Write）——这类“私有知识”不同版本的 Puppet 未必共享；自然语言与数学才是共享语言。`/agent/book` 里的旧枚举/数字字段仅为向后兼容保留，新调用方不要依赖其具体取值。
 
@@ -357,9 +358,9 @@ UserLogger.Debug(PLog.Fwd(LogLevel.Debug, "login user={0}", userName));
   ```
   返回 `{ "canShutdown": true }` 表示无其他活跃 Agent，可安全关闭进程；`false` 则建议不关或继续等待。
 
-**AgentInfo 字段**：`Id`、`Purpose`、`Operation`、`EstimatedWaitSeconds`、`Status(Active/Idle/ShuttingDown)`、`RegisteredAt`、`LastHeartbeatAt`、`PuppetInstanceName`、`CurrentSite`、`CurrentLockMode`、`Note`、`Help`、`HelpUpdatedAt`、`HelpTo`。`GET /agent/book` 另为每个 Agent 附自解释字段 `idleSeconds`、`lastActive`、`shuttingDown`、`lock`、`seeksHelp`、`helpUpdatedAt`、`helpTo`，并返回 `helpLog`（最近 20 条去重求助，含 `AgentId`/`Text`/`To`/`At`）。`lock` 为 Agent 自报状态（“reports holding …”），实际锁以 `/agent/lock/status` 的 SiteLock 派生结果为准；数字/枚举字段仅为向后兼容保留，新调用方请读这些自解释字段，跨版本更稳。
+**AgentInfo 字段**：`Id`、`Purpose`、`Operation`、`EstimatedWaitSeconds`、`Status(Active/Idle/ShuttingDown)`、`RegisteredAt`、`LastHeartbeatAt`、`PuppetInstanceName`、`CurrentSite`、`CurrentLockMode`、`Note`、`LastMessage`、`LastMessageAt`、`MessageTo`。`GET /agent/book` 另为每个 Agent 附自解释字段 `idleSeconds`、`lastActive`、`shuttingDown`、`lock`、`lastMessage`、`lastMessageAt`、`messageTo`（旧名 `seeksHelp`/`helpUpdatedAt`/`helpTo` 仍输出，等价于这三个），并返回 `chat` 对话概况（最后一条 + 条数/参与人数/首末时间；完整历史用 `GET /agent/chat`）。对话历史只存在内存中，本次应用启动后保留，上限 500 条、单条 4000 字符。`lock` 为 Agent 自报状态（“reports holding …”），实际锁以 `/agent/lock/status` 的 SiteLock 派生结果为准；数字/枚举字段仅为向后兼容保留，新调用方请读这些自解释字段，跨版本更稳。
 
-**在场同伴提示**：`/agent/*` 与 `/appagent/*` 的响应会自动附带其他 Agent 的摘要（详见「透传参数」与「跨版本互通原则」）。`Note` 用于跨 Agent 留言（「不要关闭宿主」等），`Help` 用于求助/邀请协作；两者随每次调用保留，直到被新值覆盖或分别用 `agentNote=` / `agentHelp=` 清空。会话结束调用 `agentDone=true`（任意端点）或 `POST /agent/book/release`，其状态立即从所有后续响应中消失。
+**在场同伴提示**：`/agent/*` 与 `/appagent/*` 的响应会自动附带其他 Agent 的摘要（详见「透传参数」与「跨版本互通原则」）。`Note` 用于跨 Agent 留言（「不要关闭宿主」等），`LastMessage` 用于对话；两者随每次调用保留，直到被新值覆盖或分别用 `agentNote=` / `agentSay=` 清空。会话结束调用 `agentDone=true`（任意端点）或 `POST /agent/book/release`，其状态立即从所有后续响应中消失（对话历史不随之删除）。
 
 ### SiteLock —— 建议性读写锁
 
@@ -503,7 +504,7 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 
 **发现（三级，零手动配置）**：L0 枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json`（{app, endpoint, key, protocol, pid, registeredAt}，用户档案 ACL 隔离——RDP 其他用户/远程读不到即拒绝，OS 用户隔离代行授权）；L1 扫描端口 + probe；L2 读 help。用户只需说“访问本地 9090 端口了解详情”。
 
-**多 Agent 协调（与 A 面同语义）**：`/appagent/*` 同样识别 `agentId`/`agentPurpose`/`agentOp`/`agentWaitEst`/`site`/`lockMode`/`agentNote`/`agentHelp`/`agentDone` 透传参数，自动写 AgentBook 心跳（未给 `site` 时按 `actions/<name>` / `state/<key>` 推断）；存在其他 Agent 时 JSON 响应自动附带 `peers`/`peersHint`。同伴字段遵循「自然语言 + 数学」原则：数值字段名自解释（`idleSeconds` 等），语义用自然语言（`lock`/`summary`），不使用预定义枚举码。二进制产物（`/appagent/assets/*`）与 4xx/5xx 响应不附加，避免污染字节或泄露他人会话。
+**多 Agent 协调（与 A 面同语义）**：`/appagent/*` 同样识别 `agentId`/`agentPurpose`/`agentOp`/`agentWaitEst`/`site`/`lockMode`/`agentNote`/`agentSay`/`agentDone` 透传参数，自动写 AgentBook 心跳（未给 `site` 时按 `actions/<name>` / `state/<key>` 推断）；存在其他 Agent 或对话时 JSON 响应自动附带 `peers`/`peersHint`/`chat`/`chatHint`。同伴字段遵循「自然语言 + 数学」原则：数值字段名自解释（`idleSeconds` 等），语义用自然语言（`lock`/`summary`），不使用预定义枚举码。二进制产物（`/appagent/assets/*`）与 4xx/5xx 响应不附加，避免污染字节或泄露他人会话。
 
 ### Actionize 范式（无需逐个标注）
 

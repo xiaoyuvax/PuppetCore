@@ -28,7 +28,7 @@ internal static class Program
                     lastActive = instance.LastActiveAt.ToString("HH:mm:ss")
                 }),
             agents = AgentBook.GetAll(includeStale: true)
-                .OrderByDescending(agent => !string.IsNullOrEmpty(agent.Help))
+                .OrderByDescending(agent => !string.IsNullOrEmpty(agent.LastMessage))
                 .ThenBy(agent => agent.Id, StringComparer.Ordinal)
                 .Select(agent => new
                 {
@@ -47,9 +47,9 @@ internal static class Program
                     lastActive = agent.LastHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss"),
                     @lock = AgentBook.DescribeReportedLock(agent.CurrentLockMode),
                     agent.Note,
-                    seeksHelp = string.IsNullOrEmpty(agent.Help) ? null : agent.Help,
-                    helpUpdatedAt = agent.HelpUpdatedAt,
-                    helpTo = string.IsNullOrEmpty(agent.HelpTo) ? null : agent.HelpTo
+                    lastMessage = string.IsNullOrEmpty(agent.LastMessage) ? null : agent.LastMessage,
+                    lastMessageAt = agent.LastMessageAt,
+                    messageTo = string.IsNullOrEmpty(agent.MessageTo) ? null : agent.MessageTo
                 })
         };
     }

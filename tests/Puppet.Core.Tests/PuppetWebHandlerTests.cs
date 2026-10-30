@@ -392,7 +392,7 @@ namespace Puppet.Core.Tests
             finally { PuppetRegistry.Unregister("ExposeDescribe#1"); }
         }
 
-        /// <summary>多 Agent 可见性：回复自动带 peers（自解释数值 + 自然语言 + 求助），agentDone=true 后立即消失。</summary>
+        /// <summary>多 Agent 可见性：回复自动带 peers（自解释数值 + 自然语言 + 最近一条对话）+ 对话概况，agentDone=true 后立即消失。</summary>
         [Fact]
         public void Responses_expose_other_agents_until_agentDone()
         {
@@ -401,7 +401,7 @@ namespace Puppet.Core.Tests
             try
             {
                 var beat = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey,
-                    $"agentId={a}&site=Form1.*&agentNote=do%20not%20shut%20down%20host&agentHelp=need%20help%20verifying%20save");
+                    $"agentId={a}&site=Form1.*&agentNote=do%20not%20shut%20down%20host&agentSay=need%20help%20verifying%20save");
                 Assert.True(PuppetWebHandler.TryHandle(ref beat));
 
                 var req = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey, $"agentId={b}");
@@ -411,28 +411,61 @@ namespace Puppet.Core.Tests
                 Assert.NotNull(peer);
                 Assert.Equal("Form1.*", peer.Value<string>("site"));
                 Assert.Equal("do not shut down host", peer.Value<string>("note"));
-                Assert.Equal("need help verifying save", peer.Value<string>("seeksHelp"));
+                Assert.Equal("need help verifying save", peer.Value<string>("lastMessage"));
                 Assert.True(peer.Value<int>("idleSeconds") >= 0);
                 Assert.False(string.IsNullOrEmpty(peer.Value<string>("lastActive")));
                 Assert.False(peer.Value<bool>("shuttingDown"));
                 Assert.Contains("reports holding no lock", peer.Value<string>("lock"));
                 Assert.Contains(a, peer.Value<string>("summary"));
-                Assert.Contains("seeks help", peer.Value<string>("summary"));
-                Assert.False(string.IsNullOrEmpty(peer.Value<string>("helpUpdatedAt")));
+                Assert.Contains("last said", peer.Value<string>("summary"));
+                Assert.False(string.IsNullOrEmpty(peer.Value<string>("lastMessageAt")));
                 Assert.Contains("agent/book", json.Value<string>("peersHint"));
-                Assert.Contains("agentHelp", json.Value<string>("peersHint"));
+                Assert.Contains("agentSay", json.Value<string>("peersHint"));
+                Assert.NotNull(json["chat"]);
+                Assert.Contains("agent/chat", json.Value<string>("chatHint"));
 
                 var directed = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey,
-                    $"agentId={a}&agentHelp=need%20review&agentHelpTo={b}");
+                    $"agentId={a}&agentSay=need%20review&agentSayTo={b}");
                 Assert.True(PuppetWebHandler.TryHandle(ref directed));
                 var book = MakeReq("GET", "/agent/book", PuppetKeyVault.GlobalKey);
                 Assert.True(PuppetWebHandler.TryHandle(ref book));
                 var bookJson = JObject.Parse(Body(book));
                 var bookAgent = ((JArray)bookJson["agents"]).First(x => x.Value<string>("Id") == a);
-                Assert.Equal(b, bookAgent.Value<string>("helpTo"));
-                var helpLog = (JArray)bookJson["helpLog"];
-                Assert.Contains(helpLog, x => x.Value<string>("AgentId") == a && x.Value<string>("Text") == "need help verifying save");
-                Assert.Contains(helpLog, x => x.Value<string>("AgentId") == a && x.Value<string>("Text") == "need review");
+                Assert.Equal(b, bookAgent.Value<string>("messageTo"));
+                Assert.Equal("need review", bookAgent.Value<string>("lastMessage"));
+                Assert.NotNull(bookJson["chat"]);
+
+                var chat = MakeReq("GET", "/agent/chat", PuppetKeyVault.GlobalKey, $"from={a}&tail=10");
+                Assert.True(PuppetWebHandler.TryHandle(ref chat));
+                var chatJson = JObject.Parse(Body(chat));
+                var messages = (JArray)chatJson["messages"];
+                Assert.Equal(2, chatJson.Value<int>("returned"));
+                Assert.Equal("need help verifying save", messages[0].Value<string>("text"));
+                Assert.Equal("need review", messages[1].Value<string>("text"));
+                Assert.Equal(b, messages[1].Value<string>("to"));
+
+                var keyword = MakeReq("GET", "/agent/chat", PuppetKeyVault.GlobalKey, $"from={a}&q=REVIEW");
+                Assert.True(PuppetWebHandler.TryHandle(ref keyword));
+                var keywordJson = JObject.Parse(Body(keyword));
+                Assert.Equal(1, keywordJson.Value<int>("returned"));
+                Assert.Equal(1, keywordJson.Value<int>("total"));
+
+                var one = MakeReq("GET", "/agent/chat", PuppetKeyVault.GlobalKey, $"from={a}&tail=1");
+                Assert.True(PuppetWebHandler.TryHandle(ref one));
+                var oneJson = JObject.Parse(Body(one));
+                Assert.Equal(2, oneJson.Value<int>("total"));
+                Assert.Equal(1, oneJson.Value<int>("returned"));
+                Assert.Equal("need review", ((JArray)oneJson["messages"])[0].Value<string>("text"));
+
+                var repeat = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey, $"agentId={a}&agentSay=need%20review&agentSayTo={b}");
+                Assert.True(PuppetWebHandler.TryHandle(ref repeat));
+                var afterRepeat = MakeReq("GET", "/agent/chat", PuppetKeyVault.GlobalKey, $"from={a}");
+                Assert.True(PuppetWebHandler.TryHandle(ref afterRepeat));
+                Assert.Equal(2, JObject.Parse(Body(afterRepeat)).Value<int>("total"));
+
+                var badTime = MakeReq("GET", "/agent/chat", PuppetKeyVault.GlobalKey, "since=not-a-time");
+                Assert.True(PuppetWebHandler.TryHandle(ref badTime));
+                Assert.Equal(400, badTime.Response.StatusCode);
 
                 var done = MakeReq("GET", "/agent/registry", PuppetKeyVault.GlobalKey, $"agentId={a}&agentDone=true");
                 Assert.True(PuppetWebHandler.TryHandle(ref done));
@@ -479,11 +512,12 @@ namespace Puppet.Core.Tests
                 Assert.Equal("real-action", AgentBook.GetAll().Single(a => a.Id == agent).Operation);
 
                 var heartbeat = MakeReq("POST", "/agent/book/heartbeat", PuppetKeyVault.GlobalKey);
-                var heartbeatBody = Encoding.UTF8.GetBytes($"{{\"id\":\"{agent}\",\"help\":\"need help via heartbeat\"}}");
+                var heartbeatBody = Encoding.UTF8.GetBytes($"{{\"id\":\"{agent}\",\"say\":\"need help via heartbeat\"}}");
                 heartbeat.InputStream = new MemoryStream(heartbeatBody);
                 heartbeat.ContentLength = heartbeatBody.Length;
                 Assert.True(PuppetWebHandler.TryHandle(ref heartbeat));
                 Assert.Equal("real-action", AgentBook.GetAll().Single(a => a.Id == agent).Operation);
+                Assert.Equal("need help via heartbeat", AgentBook.GetAll().Single(a => a.Id == agent).LastMessage);
             }
             finally
             {

@@ -39,7 +39,7 @@ public sealed class TaskBoardForm : Form, IPuppet
     private readonly Label _status = MakeLabel("BoardStatus", Loc.T("从一件小事开始。任务仅保存在本次会话。", "Start with one small thing. Tasks live only in this session."), 10);
     private readonly TextBox _presence = new()
     {
-        Name = "PuppetPresence", AccessibleName = Loc.T("Puppet 注册、状态与求助", "Puppet registrations, status and help"),
+        Name = "PuppetPresence", AccessibleName = Loc.T("Puppet 注册、状态与对话", "Puppet registrations, status and chat"),
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.FixedSingle,
         Dock = DockStyle.Fill, BackColor = Color.White, ForeColor = Color.FromArgb(35, 48, 65),
         Font = new Font("Microsoft YaHei UI", 9.5f), TabStop = false, Margin = Padding.Empty
@@ -395,12 +395,12 @@ public sealed class TaskBoardForm : Form, IPuppet
         string FormatAgent(AgentInfo agent)
         {
             var idle = (int)Math.Max(0, (now - agent.LastHeartbeatAt).TotalSeconds);
-            var helpFlag = string.IsNullOrEmpty(agent.Help)
+            var messageFlag = string.IsNullOrEmpty(agent.LastMessage)
                 ? ""
-                : string.IsNullOrEmpty(agent.HelpTo)
-                    ? Loc.T("[求助] ", "[help] ")
-                    : Loc.T($"[求助→{agent.HelpTo}] ", $"[help→{agent.HelpTo}] ");
-            var flags = helpFlag + (idle > 60 ? Loc.T("[超过60秒未心跳] ", "[stale >60s] ") : "");
+                : string.IsNullOrEmpty(agent.MessageTo)
+                    ? Loc.T("[对话] ", "[chat] ")
+                    : Loc.T($"[对话→{agent.MessageTo}] ", $"[chat→{agent.MessageTo}] ");
+            var flags = messageFlag + (idle > 60 ? Loc.T("[超过60秒未心跳] ", "[stale >60s] ") : "");
             var line = $"  {flags}{agent.Id} · {agent.PuppetInstanceName}";
             if (!string.IsNullOrEmpty(agent.CurrentSite)) line += $" · {Loc.T("站点", "site")} {agent.CurrentSite}";
             if (!string.IsNullOrEmpty(agent.Operation)) line += $" · {agent.Operation}";
@@ -412,20 +412,20 @@ public sealed class TaskBoardForm : Form, IPuppet
             };
             line += $" · {idle}s · {status} · {AgentBook.DescribeReportedLock(agent.CurrentLockMode)}";
             if (!string.IsNullOrEmpty(agent.Note)) line += Environment.NewLine + $"    {Loc.T("注意", "note")}：{agent.Note}";
-            if (!string.IsNullOrEmpty(agent.Help)) line += Environment.NewLine + $"    {Loc.T("求助", "help")}：{agent.Help}";
+            if (!string.IsNullOrEmpty(agent.LastMessage)) line += Environment.NewLine + $"    {Loc.T("对话", "chat")}：{agent.LastMessage}";
             return line;
         }
 
-        var helpAgents = agents.Where(agent => !string.IsNullOrEmpty(agent.Help)).Select(FormatAgent).ToList();
-        var otherAgents = agents.Where(agent => string.IsNullOrEmpty(agent.Help)).Select(FormatAgent).ToList();
+        var chatAgents = agents.Where(agent => !string.IsNullOrEmpty(agent.LastMessage)).Select(FormatAgent).ToList();
+        var otherAgents = agents.Where(agent => string.IsNullOrEmpty(agent.LastMessage)).Select(FormatAgent).ToList();
 
         var text = new StringBuilder();
         text.AppendLine(Loc.T($"Puppet 注册 · {puppets.Count}", $"Puppet registrations · {puppets.Count}"));
         if (puppets.Count == 0) text.AppendLine(Loc.T("  暂无注册实例。", "  No registered instances."));
         else foreach (var puppet in puppets) text.AppendLine(puppet);
-        text.AppendLine(Loc.T($"求助 · {helpAgents.Count}", $"Help requests · {helpAgents.Count}"));
-        if (helpAgents.Count == 0) text.AppendLine(Loc.T("  暂无求助。", "  No help requests."));
-        else foreach (var agent in helpAgents) text.AppendLine(agent);
+        text.AppendLine(Loc.T($"对话 · {chatAgents.Count}", $"Conversation · {chatAgents.Count}"));
+        if (chatAgents.Count == 0) text.AppendLine(Loc.T("  暂无对话。", "  No messages yet."));
+        else foreach (var agent in chatAgents) text.AppendLine(agent);
         text.AppendLine(Loc.T($"Agent 状态 · {otherAgents.Count}", $"Agent status · {otherAgents.Count}"));
         if (otherAgents.Count == 0) text.AppendLine(Loc.T("  暂无其他 Agent。", "  No other agents."));
         else foreach (var agent in otherAgents) text.AppendLine(agent);

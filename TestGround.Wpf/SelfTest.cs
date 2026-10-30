@@ -26,7 +26,7 @@ internal static class SelfTest
             window.RefreshPresence();
             Check(model.AgentPresence.Contains(presenceAgent, StringComparison.Ordinal)
                 && model.AgentPresence.Contains("selftest help", StringComparison.Ordinal)
-                && model.AgentPresence.Contains("selftest note", StringComparison.Ordinal), "presence shows agent status and help");
+                && model.AgentPresence.Contains("selftest note", StringComparison.Ordinal), "presence shows agent status and chat");
         }
         finally { AgentBook.Release(presenceAgent); }
         Check(model.TotalCount == 0 && model.OverallProgress == 0, "empty aggregate");

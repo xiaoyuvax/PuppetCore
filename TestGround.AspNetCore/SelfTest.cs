@@ -112,7 +112,7 @@ internal static class SelfTest
             Check(presence["agents"]!.AsArray().Any(a => a!["id"]!.GetValue<string>() == presenceAgent
                 && a["status"]!.GetValue<string>() == "idle"
                 && a["note"]!.GetValue<string>() == "selftest note"
-                && a["seeksHelp"]!.GetValue<string>() == "selftest help"));
+                && a["lastMessage"]!.GetValue<string>() == "selftest help"));
         }
         finally { AgentBook.Release(presenceAgent); }
         var description = await agent.GetStringAsync("/agent/describe?name=Inventory&format=json");

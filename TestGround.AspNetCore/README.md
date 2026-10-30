@@ -43,7 +43,7 @@ finally { $env:PUPPET_TESTGROUND_KEY = $null }
 | 请求 | 请求体 | 成功 |
 | --- | --- | --- |
 | GET /api/inventory | 无 | 200，一次一致快照，stock 与 reservations |
-| GET /api/presence | 无 | 200，已注册 Puppet 与各 Agent 的状态、注意、求助；页面每 2 秒自动刷新 |
+| GET /api/presence | 无 | 200，已注册 Puppet 与各 Agent 的状态、注意、对话；页面每 2 秒自动刷新 |
 | POST /api/stock | {"sku":"PAPER","name":"纸张","quantity":12} | 201，库存 |
 | POST /api/reservations | {"sku":"PAPER","quantity":2} | 201，预留，含 id |
 | DELETE /api/reservations/{id} | 无 | 204，释放整笔预留 |
@@ -56,7 +56,7 @@ SKU 为 1..24 个大写 ASCII 字母、数字或连字符；名称为 1..80 字�
 
 Puppet 暴露真实业务方法 `Snapshot()`、`CreateStock(sku,name,quantity)`、`Reserve(sku,quantity)`、`Release(id)`。例如 POST `/agent/invoke?name=Inventory&method=Reserve`，JSON 参数数组 `["PAPER",2]`。沿用核心响应约定（业务失败为 ok=false，鉴权失败为 404），不强行改成普通 API 状态码。核心 `/agent/key/refresh` 会让两套写接口上的旧密钥失效；调用方只在内存接收新密钥，页面需重新输入。
 
-页面中的“Puppet 注册与求助”卡片读取 `GET /api/presence`，每 2 秒刷新一次：上半部分列出 `PuppetRegistry` 中的实例，下半部分列出 `AgentBook` 中每个 Agent 的实例、站点、操作、状态、空闲秒数、锁、注意与求助内容。该读取接口与库存读取一样不要求密钥，仅用于可信本机；无密钥时明确显示 Puppet 已禁用。
+页面中的“Puppet 注册与对话”卡片读取 `GET /api/presence`，每 2 秒刷新一次：上半部分列出 `PuppetRegistry` 中的实例，下半部分列出 `AgentBook` 中每个 Agent 的实例、站点、操作、状态、空闲秒数、锁、注意与对话内容。该读取接口与库存读取一样不要求密钥，仅用于可信本机；无密钥时明确显示 Puppet 已禁用。
 
 ## 页面截图（按需授权）
 

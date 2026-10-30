@@ -170,11 +170,11 @@ namespace Puppet.Core.Tests
                 Assert.NotNull(peer);
                 Assert.Equal("Run", peer.Value<string>("site"));
                 Assert.Equal("do not close host", peer.Value<string>("note"));
-                Assert.Equal("need someone to check the result", peer.Value<string>("seeksHelp"));
+                Assert.Equal("need someone to check the result", peer.Value<string>("lastMessage"));
                 Assert.True(peer.Value<int>("idleSeconds") >= 0);
                 Assert.Contains("write lock", peer.Value<string>("lock"));
                 Assert.Contains("do not close host", peer.Value<string>("summary"));
-                Assert.Contains("seeks help", peer.Value<string>("summary"));
+                Assert.Contains("last said", peer.Value<string>("summary"));
                 Assert.Contains("agent/book", json.Value<string>("peersHint"));
 
                 var done = MakeReq("GET", "/appagent/manifest", key, $"agentId={b}&agentDone=true");

@@ -19,10 +19,10 @@ internal static class SelfTest
             form.RefreshPresence();
             Check(form.PresenceText.Contains(presenceAgent, StringComparison.Ordinal)
                 && form.PresenceText.Contains("selftest help", StringComparison.Ordinal)
-                && form.PresenceText.Contains("selftest note", StringComparison.Ordinal), "presence shows agent status and help");
-            Check(form.PresenceText.Contains(Loc.T("[求助]", "[help]"), StringComparison.Ordinal)
-                && form.PresenceText.Contains(Loc.T("求助 · ", "Help requests · "), StringComparison.Ordinal),
-                "presence groups help requests first");
+                && form.PresenceText.Contains("selftest note", StringComparison.Ordinal), "presence shows agent status and chat");
+            Check(form.PresenceText.Contains(Loc.T("[对话]", "[chat]"), StringComparison.Ordinal)
+                && form.PresenceText.Contains(Loc.T("对话 · ", "Conversation · "), StringComparison.Ordinal),
+                "presence groups messages first");
         }
         finally { AgentBook.Release(presenceAgent); }
         Check(form.TotalCount == 0 && form.VisibleCount == 0, "empty board");

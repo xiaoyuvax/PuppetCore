@@ -20,31 +20,46 @@ namespace Puppet.Core
         public LockMode CurrentLockMode { get; set; }
         /// <summary>给其他 Agent 的注意事项（如「不要关闭宿主」「不要操作某 site」）；空串表示无。</summary>
         public string Note { get; set; }
-        /// <summary>向其他 Agent 的求助/协作邀请（自由文本，如「需要人核对保存对话框」）；空串表示无。</summary>
-        public string Help { get; set; }
-        /// <summary>当前求助的更新时间；无求助时为 null。</summary>
-        public DateTime? HelpUpdatedAt { get; set; }
-        /// <summary>求助的目标 Agent Id；空串表示广播。</summary>
-        public string HelpTo { get; set; }
+        /// <summary>最近一条对话内容（自由文本）；空串表示未发言。</summary>
+        public string LastMessage { get; set; }
+        /// <summary>最近一条对话的更新时间；未发言时为 null。</summary>
+        public DateTime? LastMessageAt { get; set; }
+        /// <summary>最近一条对话的目标 Agent Id；空串表示广播。</summary>
+        public string MessageTo { get; set; }
     }
 
-    public sealed class HelpRecord
+    public sealed class ChatMessage
     {
+        public long Seq { get; set; }
         public string AgentId { get; set; }
         public string Text { get; set; }
         public string To { get; set; }
         public DateTime At { get; set; }
     }
 
+    public sealed class ChatOverview
+    {
+        public int Messages { get; set; }
+        public int Agents { get; set; }
+        public DateTime? FirstAt { get; set; }
+        public DateTime? LastAt { get; set; }
+        public ChatMessage Last { get; set; }
+        public string Summary { get; set; }
+    }
+
     public static class AgentBook
     {
         private static readonly ConcurrentDictionary<string, AgentInfo> _agents = new();
-        private static readonly ConcurrentQueue<HelpRecord> _helpLog = new();
-        private const int MaxHelpLog = 20;
+        private static readonly List<ChatMessage> _chat = new();
+        private static readonly object _chatLock = new();
+        private static long _chatSeq;
+        private const int MaxChatMessages = 500;
+        private const int MaxChatTextLength = 4000;
 
-        public static void Heartbeat(string agentId, string purpose, string operation, int estWaitSec, string puppetInstanceName, string site = null, LockMode lockMode = LockMode.None, string note = null, string help = null, string helpTo = null)
+        public static void Heartbeat(string agentId, string purpose, string operation, int estWaitSec, string puppetInstanceName, string site = null, LockMode lockMode = LockMode.None, string note = null, string message = null, string messageTo = null)
         {
             if (string.IsNullOrEmpty(agentId)) return;
+            if (message is { Length: > MaxChatTextLength }) message = message.Substring(0, MaxChatTextLength);
 
             _agents.AddOrUpdate(agentId,
                 _ => new AgentInfo
@@ -60,9 +75,9 @@ namespace Puppet.Core
                     CurrentSite = site ?? "",
                     CurrentLockMode = lockMode,
                     Note = note ?? "",
-                    Help = help ?? "",
-                    HelpUpdatedAt = string.IsNullOrEmpty(help) ? null : DateTime.Now,
-                    HelpTo = string.IsNullOrEmpty(help) ? "" : (helpTo ?? "")
+                    LastMessage = message ?? "",
+                    LastMessageAt = string.IsNullOrEmpty(message) ? null : DateTime.Now,
+                    MessageTo = string.IsNullOrEmpty(message) ? "" : (messageTo ?? "")
                 },
                 (_, existing) =>
                 {
@@ -75,26 +90,26 @@ namespace Puppet.Core
                     existing.CurrentSite = site ?? existing.CurrentSite;
                     existing.CurrentLockMode = lockMode;
                     existing.Note = note ?? existing.Note;
-                    if (help != null)
+                    if (message != null)
                     {
-                        var helpToValue = string.IsNullOrEmpty(help) ? "" : (helpTo ?? existing.HelpTo ?? "");
-                        if (!string.Equals(existing.Help, help, StringComparison.Ordinal)
-                            || !string.Equals(existing.HelpTo, helpToValue, StringComparison.Ordinal))
+                        var messageToValue = string.IsNullOrEmpty(message) ? "" : (messageTo ?? existing.MessageTo ?? "");
+                        if (!string.Equals(existing.LastMessage, message, StringComparison.Ordinal)
+                            || !string.Equals(existing.MessageTo, messageToValue, StringComparison.Ordinal))
                         {
-                            existing.Help = help;
-                            existing.HelpTo = helpToValue;
-                            existing.HelpUpdatedAt = string.IsNullOrEmpty(help) ? null : DateTime.Now;
+                            existing.LastMessage = message;
+                            existing.MessageTo = messageToValue;
+                            existing.LastMessageAt = string.IsNullOrEmpty(message) ? null : DateTime.Now;
                         }
                     }
-                    else if (helpTo != null && !string.IsNullOrEmpty(existing.Help))
+                    else if (messageTo != null && !string.IsNullOrEmpty(existing.LastMessage))
                     {
-                        existing.HelpTo = helpTo;
+                        existing.MessageTo = messageTo;
                     }
                     return existing;
                 });
 
-            if (!string.IsNullOrEmpty(help) && !_helpLog.Any(h => h.AgentId == agentId && h.Text == help))
-                RecordHelp(agentId, help, helpTo ?? _agents[agentId].HelpTo, _agents[agentId].HelpUpdatedAt ?? DateTime.Now);
+            if (!string.IsNullOrEmpty(message))
+                AppendMessage(agentId, message, messageTo ?? _agents[agentId].MessageTo, DateTime.Now);
 
             CleanupStale();
         }
@@ -143,12 +158,56 @@ namespace Puppet.Core
             _ => "reports holding no lock"
         };
 
-        public static List<HelpRecord> GetHelpLog() => _helpLog.ToList();
-
-        private static void RecordHelp(string agentId, string text, string to, DateTime at)
+        /// <summary>按时间/关键字/收发方筛选本次应用启动以来的对话；结果按时间正序。</summary>
+        public static List<ChatMessage> GetChat(DateTime? since = null, DateTime? until = null, string keyword = null, string from = null, string to = null)
         {
-            _helpLog.Enqueue(new HelpRecord { AgentId = agentId, Text = text, To = to, At = at });
-            while (_helpLog.Count > MaxHelpLog && _helpLog.TryDequeue(out _)) { }
+            lock (_chatLock)
+            {
+                IEnumerable<ChatMessage> query = _chat;
+                if (since.HasValue) query = query.Where(m => m.At >= since.Value);
+                if (until.HasValue) query = query.Where(m => m.At <= until.Value);
+                if (!string.IsNullOrEmpty(from)) query = query.Where(m => m.AgentId == from);
+                if (!string.IsNullOrEmpty(to)) query = query.Where(m => string.Equals(m.To ?? "", to, StringComparison.Ordinal));
+                if (!string.IsNullOrEmpty(keyword)) query = query.Where(m => m.Text?.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
+                return query.ToList();
+            }
+        }
+
+        public static ChatOverview GetChatOverview()
+        {
+            lock (_chatLock)
+            {
+                if (_chat.Count == 0) return new ChatOverview { Summary = "no conversation yet" };
+                var last = _chat[_chat.Count - 1];
+                var agents = _chat.Select(m => m.AgentId).Distinct().Count();
+                return new ChatOverview
+                {
+                    Messages = _chat.Count,
+                    Agents = agents,
+                    FirstAt = _chat[0].At,
+                    LastAt = last.At,
+                    Last = last,
+                    Summary = $"{_chat.Count} messages from {agents} agents since {_chat[0].At:yyyy-MM-dd HH:mm:ss}; " +
+                              $"last from {last.AgentId}" + (string.IsNullOrEmpty(last.To) ? "" : $" to {last.To}") +
+                              $" at {last.At:yyyy-MM-dd HH:mm:ss}"
+                };
+            }
+        }
+
+        private static void AppendMessage(string agentId, string text, string to, DateTime at)
+        {
+            lock (_chatLock)
+            {
+                for (var i = _chat.Count - 1; i >= 0; i--)
+                {
+                    if (_chat[i].AgentId != agentId) continue;
+                    // 同一 Agent 每次调用都会重复带上当前消息，只在内容/目标变化时记一条
+                    if (_chat[i].Text == text && string.Equals(_chat[i].To ?? "", to ?? "", StringComparison.Ordinal)) return;
+                    break;
+                }
+                _chat.Add(new ChatMessage { Seq = ++_chatSeq, AgentId = agentId, Text = text, To = to ?? "", At = at });
+                while (_chat.Count > MaxChatMessages) _chat.RemoveAt(0);
+            }
         }
 
         private static void CleanupStale()

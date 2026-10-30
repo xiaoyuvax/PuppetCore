@@ -15,7 +15,7 @@ internal static class Commands
         "分类：1..32 个小写 ASCII 字母、数字、- 或 _。备注：0..200 字符，不含控制/格式字符。\n" +
         "备注为行内其余内容，不支持引号/转义；首尾空白会被去除。\n" +
         "budget 设置预算上限（off 取消）；clear 清空全部记录。\n" +
-        "presence 输出已注册 Puppet 与各 Agent 的状态/注意/求助；交互终端在有变化时自动提示。\n" +
+        "presence 输出已注册 Puppet 与各 Agent 的状态/注意/对话；交互终端在有变化时自动提示。\n" +
         "单条命令上限 512 字符；账本上限 10000 条。\n" +
         "--serve 在 stdin EOF 后继续运行；quit、Ctrl+C 或 Agent Stop 结束进程。\n" +
         "--self-test 需要 PUPPET_TESTGROUND_KEY，执行本地与 HTTP 检查。",
@@ -115,9 +115,9 @@ internal static class Commands
                     },
                     Lock = AgentBook.DescribeReportedLock(agent.CurrentLockMode),
                     agent.Note,
-                    SeeksHelp = string.IsNullOrEmpty(agent.Help) ? null : agent.Help,
-                    agent.HelpUpdatedAt,
-                    HelpTo = string.IsNullOrEmpty(agent.HelpTo) ? null : agent.HelpTo
+                    LastMessage = string.IsNullOrEmpty(agent.LastMessage) ? null : agent.LastMessage,
+                    agent.LastMessageAt,
+                    MessageTo = string.IsNullOrEmpty(agent.MessageTo) ? null : agent.MessageTo
                 })
         };
     }
@@ -144,8 +144,8 @@ internal static class Commands
                 line += $" idle={idle}s status={status}";
                 if (idle > 60) line += " stale";
                 if (!string.IsNullOrEmpty(agent.Note)) line += $" note=\"{agent.Note}\"";
-                if (!string.IsNullOrEmpty(agent.Help)) line += $" help=\"{agent.Help}\"";
-                if (!string.IsNullOrEmpty(agent.HelpTo)) line += $" helpTo={agent.HelpTo}";
+                if (!string.IsNullOrEmpty(agent.LastMessage)) line += $" say=\"{agent.LastMessage}\"";
+                if (!string.IsNullOrEmpty(agent.MessageTo)) line += $" sayTo={agent.MessageTo}";
                 return line;
             });
         return $"puppets=[{string.Join(", ", puppets)}] agents=[{string.Join("; ", agents)}]";
