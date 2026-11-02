@@ -85,6 +85,8 @@ new PuppetWebServer().UseFormControls().Start("0.0.0.0:9090");
 
 `/agent/control` 覆盖 **Control 树 + ToolStripItem**：工具栏按钮、菜单项、下拉子项都不是 `Control`，纯控件树遍历不到（1.4.x 起一并进 `GET /agent/control` 的 `controls` 列表，可 `action=click`/`gettext`；`[PuppetIgnore]` 对条目同样生效）。控件名即 Designer 字段名。
 
+`PropertyGrid` 额外支持 `POST /agent/control?...&ctrl=<网格>&action=rows`：按行导出 `label`/`property`/`type`/`value`/`display`/`standardValues`，其中 `display` 与 `standardValues` 走 `GridEntry.GetPropertyTextValue`，与下拉列表实际显示的文本同源——用于验证"这个属性可调哪些值"，无需真实点开列表（`PropertyGridView.PopupEditor` 会进 `DoModalLoop` 模态循环，且列表是独立顶层窗口，`CaptureAction` 的 `DrawToBitmap` 截不到）。
+
 其他自定义端点用 `UseHandler(req => myHandler.TryHandle(ref req))` 挂接（先于内建 `/agent/*` 执行）。
 
 ### 模式 C：双服务器（端口隔离）

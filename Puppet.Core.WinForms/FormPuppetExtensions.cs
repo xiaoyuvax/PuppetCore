@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using Wima.Core;
 
@@ -42,11 +43,11 @@ namespace Puppet.Core.WinForms
             return Utils.ToJson(new { ok = true, controls = controls.Concat(items) });
         }
 
-        /// <summary>执行控件操作（Click/SetText/SelectIndex/Toggle 等）。
+        /// <summary>执行控件操作（Click/SetText/SelectIndex/Toggle/Rows 等）。
         /// 控件树找不到时回落到 ToolStripItem（工具栏按钮/菜单项都不是 Control，需单独寻址）。</summary>
         /// <param name="form">目标窗体</param>
         /// <param name="controlName">控件名或 ToolStripItem 名</param>
-        /// <param name="action">操作类型：click/settext/select/toggle/getvalue/setvalue/gettext</param>
+        /// <param name="action">操作类型：click/settext/select/toggle/getvalue/setvalue/gettext/rows</param>
         /// <param name="value">操作值</param>
         public static string InvokeControl(this IPuppet form, string controlName, string action, object value = null)
         {
@@ -144,6 +145,7 @@ namespace Puppet.Core.WinForms
             if (c is CheckBox) return new[] { "check", "toggle", "checked" };
             if (c is ComboBox) return new[] { "gettext", "select", "items" };
             if (c is NumericUpDown) return new[] { "getvalue", "setvalue" };
+            if (c is PropertyGrid) return new[] { "rows" };
             if (c is MenuStrip) return new[] { "items", "click" };
             if (c is TreeView) return new[] { "nodes", "select", "expand", "collapse" };
             if (c is DataGridView) return new[] { "rows", "cells", "select" };
@@ -252,6 +254,8 @@ namespace Puppet.Core.WinForms
                     case NumericUpDown nud when action == "setvalue":
                         nud.Value = Convert.ToDecimal(value);
                         return Utils.ToJson(new { ok = true });
+                    case PropertyGrid pg when action == "rows":
+                        return ReadPropertyGridRows(pg);
                     default:
                         return Utils.ToJson(new { ok = false, err = $"unsupported action '{action}' on {ctrl.GetType().Name}" });
                 }
@@ -260,6 +264,94 @@ namespace Puppet.Core.WinForms
             {
                 return Utils.ToJson(new { ok = false, err = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// PropertyGrid 行快照：把网格当前显示的属性行（分类标题行除外）连同每行的下拉候选值导出。
+        /// 候选值走 GridEntry.GetPropertyValueList + GetPropertyTextValue —— 与下拉列表实际显示的文本同源，
+        /// 因此可直接验证"该属性可调哪些值"，无需真实点开列表（PropertyGridView.PopupEditor 会进
+        /// DoModalLoop 模态循环，且列表是独立顶层窗口，DrawToBitmap 截不到）。
+        /// shortcut: 依赖 PropertyGridInternal 内部成员名（WinForms 升级改名则 rows 返回 ok:false），
+        /// 出现 ok:false 时按新版本内部成员名更新 FindMethod/ReadMember。
+        /// </summary>
+        private static string ReadPropertyGridRows(PropertyGrid pg)
+        {
+            try
+            {
+                var grid = pg.Controls.Cast<Control>()
+                    .FirstOrDefault(c => c.GetType().Name == "PropertyGridView");
+                if (grid == null) return Utils.ToJson(new { ok = false, err = "PropertyGridView not found" });
+
+                var getEntry = FindMethod(grid.GetType(), "GetGridEntryFromRow", typeof(int));
+                if (getEntry == null)
+                    return Utils.ToJson(new { ok = false, err = "GetGridEntryFromRow not found (WinForms internals changed)" });
+
+                var rows = new List<object>();
+                for (int i = 0; i < 500; i++)
+                {
+                    object entry;
+                    try { entry = getEntry.Invoke(grid, new object[] { i }); }
+                    catch { break; }
+                    if (entry == null) break;
+
+                    var entryType = entry.GetType();
+                    if (ReadMember(entryType, entry, "PropertyDescriptor") is not PropertyDescriptor pd)
+                        continue;   // 分类标题行
+
+                    var enumerable = ReadMember(entryType, entry, "Enumerable") is true;
+                    var raw = ReadMember(entryType, entry, "PropertyValue");
+                    var values = enumerable
+                        ? FindMethod(entryType, "GetPropertyValueList")?.Invoke(entry, null) as object[]
+                        : null;
+
+                    rows.Add(new
+                    {
+                        index = i,
+                        label = ReadMember(entryType, entry, "Label") as string,
+                        property = pd.Name,
+                        type = pd.PropertyType.Name,
+                        value = raw?.ToString(),
+                        display = enumerable ? TextOf(entryType, entry, raw) : raw?.ToString(),
+                        standardValues = values?.Select(v => TextOf(entryType, entry, v)).ToArray()
+                    });
+                }
+                return Utils.ToJson(new { ok = true, rows });
+            }
+            catch (Exception ex)
+            {
+                return Utils.ToJson(new { ok = false, err = ex.InnerException?.Message ?? ex.Message });
+            }
+        }
+
+        /// <summary>GridEntry.GetPropertyTextValue(object)：下拉列表/网格单元格显示的文本（转换器 ConvertTo 后）。</summary>
+        private static string TextOf(Type entryType, object entry, object value)
+            => FindMethod(entryType, "GetPropertyTextValue", typeof(object))?.Invoke(entry, new[] { value }) as string
+               ?? value?.ToString();
+
+        private static MethodInfo FindMethod(Type type, string name, params Type[] argTypes)
+        {
+            for (var t = type; t != null; t = t.BaseType)
+            {
+                var m = t.GetMethod(name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly,
+                    null, argTypes, null);
+                if (m != null) return m;
+            }
+            return null;
+        }
+
+        private static object ReadMember(Type type, object instance, string name)
+        {
+            for (var t = type; t != null; t = t.BaseType)
+            {
+                var p = t.GetProperty(name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (p != null) return p.GetValue(instance);
+                var f = t.GetField(name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (f != null) return f.GetValue(instance);
+            }
+            return null;
         }
     }
 }

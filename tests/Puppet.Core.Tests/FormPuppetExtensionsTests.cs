@@ -151,5 +151,80 @@ namespace Puppet.Core.Tests
             Assert.Equal("ToolStripButton", json.Value<string>("type"));
             Assert.NotNull(json["checkedState"]);
         }
+
+        /// <summary>标准值转换器（模拟 Content.fontWeight 这类"下拉值 + 中文标签"）。</summary>
+        private sealed class LevelConverter : StringConverter
+        {
+            public override bool GetStandardValuesSupported(ITypeDescriptorContext context) => true;
+            public override bool GetStandardValuesExclusive(ITypeDescriptorContext context) => false;
+            public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext context)
+                => new(new[] { "a", "b" });
+            public override object ConvertTo(ITypeDescriptorContext context, System.Globalization.CultureInfo culture,
+                object value, Type destinationType)
+                => destinationType == typeof(string) && value is string s
+                    ? (s == "a" ? "甲 (a)" : s == "b" ? "乙 (b)" : s)
+                    : base.ConvertTo(context, culture, value, destinationType);
+            public override object ConvertFrom(ITypeDescriptorContext context, System.Globalization.CultureInfo culture, object value)
+                => value is string s && s.StartsWith("甲") ? "a" : value is string s2 && s2.StartsWith("乙") ? "b" : base.ConvertFrom(context, culture, value);
+        }
+
+        private sealed class GridModel
+        {
+            [DisplayName("档位")]
+            [TypeConverter(typeof(LevelConverter))]
+            public string level { get; set; } = "a";
+
+            [DisplayName("名称")]
+            public string title { get; set; } = "hello";
+        }
+
+        private sealed class GridHost : Form, IPuppet
+        {
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+            public string AgentAccessKey { get; set; } = "k";
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+            public Common.Logging.ILog AgentLog { get; set; }
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+            public string AgentInstanceName { get; set; } = "Grid#1";
+
+            public readonly PropertyGrid pgModel = new() { Name = "pgModel", Dock = DockStyle.Fill };
+
+            public GridHost()
+            {
+                Controls.Add(pgModel);
+                pgModel.SelectedObject = new GridModel();
+                CreateControl();
+                pgModel.CreateControl();
+                pgModel.Refresh();
+            }
+        }
+
+        /// <summary>PropertyGrid rows：导出行 + 下拉候选值（与下拉列表同源，避免点开模态列表）。</summary>
+        [Fact]
+        public void InvokeControl_PropertyGrid_Rows_Exports_StandardValues()
+        {
+            using var host = new GridHost();
+            var json = Json(host.InvokeControl("pgModel", "rows"));
+            Assert.True(json.Value<bool>("ok"), json.ToString());
+
+            var level = json["rows"].FirstOrDefault(r => (string)r["property"] == "level");
+            Assert.NotNull(level);
+            Assert.Equal("a", level.Value<string>("value"));
+            Assert.Equal("甲 (a)", level.Value<string>("display"));
+            Assert.Equal(new[] { "甲 (a)", "乙 (b)" }, level["standardValues"].Select(v => (string)v).ToArray());
+
+            var title = json["rows"].FirstOrDefault(r => (string)r["property"] == "title");
+            Assert.NotNull(title);
+            Assert.Null(title["standardValues"]);
+        }
+
+        [Fact]
+        public void DescribeControls_PropertyGrid_Advertises_Rows()
+        {
+            using var host = new GridHost();
+            var json = Json(host.DescribeControls());
+            var pg = json["controls"].First(c => (string)c["name"] == "pgModel");
+            Assert.Contains("rows", pg["capabilities"].Select(c => (string)c));
+        }
     }
 }
