@@ -6,9 +6,9 @@ using Wima.Core;
 namespace Puppet.Core.Describe
 {
     /// <summary>
-    /// 能力描述生成器。通过反射枚举可被 Agent 访问的成员，提取 <summary>。
+    /// 能力描述生成器。通过反射枚举可被 Agent 访问的成员，提取 &lt;summary&gt;。
     /// 规则：仅列出 public 成员与带 [PuppetExpose] 的非 public 成员（广告/焦点，非访问授权）；带 [PuppetIgnore] 者不列出。
-    /// <summary> 由人类维护，可能陈旧失真，仅作次级参考（通过 SummarySource 字段标识）。
+    /// &lt;summary&gt; 由人类维护，可能陈旧失真，仅作次级参考（通过 SummarySource 字段标识）。
     /// </summary>
     public static class CapabilityDescriber
     {

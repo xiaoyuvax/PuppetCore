@@ -42,7 +42,9 @@ namespace Puppet.Core.Tests
 
             string actual = EndpointBinder.FindFree($"127.0.0.1:{port}", maxAttempts: 3);
 
-            Assert.Equal($"127.0.0.1:{port + 1}", actual);
+            // 并行测试进程可能同时占住相邻端口，只断言跳过被占端口并落在尝试范围内
+            int actualPort = int.Parse(actual[(actual.LastIndexOf(':') + 1)..]);
+            Assert.InRange(actualPort, port + 1, port + 2);
         }
 
         [Fact]
@@ -68,7 +70,9 @@ namespace Puppet.Core.Tests
             try
             {
                 Assert.True(server.Start($"127.0.0.1:{port}"));
-                Assert.Equal($"127.0.0.1:{port + 1}", server.Endpoint);
+
+                int actualPort = int.Parse(server.Endpoint[(server.Endpoint.LastIndexOf(':') + 1)..]);
+                Assert.InRange(actualPort, port + 1, port + EndpointBinder.MaxAttempts - 1);
             }
             finally
             {
