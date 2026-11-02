@@ -40,11 +40,11 @@ namespace Puppet.Core.Tests
         {
             using var blocker = PortBlock.One(out int port);
 
-            string actual = EndpointBinder.FindFree($"127.0.0.1:{port}", maxAttempts: 3);
+            string actual = EndpointBinder.FindFree($"127.0.0.1:{port}");
 
-            // 并行测试进程可能同时占住相邻端口，只断言跳过被占端口并落在尝试范围内
+            // 并行测试进程可能同时占住相邻端口（各自都从 20000 起扫），只断言跳过被占端口并落在尝试范围内
             int actualPort = int.Parse(actual[(actual.LastIndexOf(':') + 1)..]);
-            Assert.InRange(actualPort, port + 1, port + 2);
+            Assert.InRange(actualPort, port + 1, port + EndpointBinder.MaxAttempts - 1);
         }
 
         [Fact]
