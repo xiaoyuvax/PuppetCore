@@ -703,6 +703,32 @@ var run = await hub.ActionAsync("GenerateImageAction", "ImageGen#1", new { promp
 
 **边界**：Hub 引用 = 进程内全权限，不要暴露给脚本/插件宿主；外部 Agent 仍走 HTTP——跨进程才是真实的安全边界。
 
+### 内嵌 Agent 的 InProcess 接法（推荐）
+
+宿主自带 Agent（同进程、同 UI 线程模型）时，**不要让 Agent 层再走 HTTP 回环**：工具/技能层直接接 `server.Hub`，由它调用同一条 `ProcessWebRequest` 瀑布。能力、鉴权、实例级串行、DialogBroker、审计与外部调用完全一致，只少了 socket 与 HTTP 客户端这一跳。
+
+**为什么**：端口占用/顺延、回环被安全软件或系统代理劫持、防火墙、密钥分发与档案文件不可读、连接超时与半开连接——这些外部通讯故障对内嵌 Agent 全部消失；顺带省掉 TCP + HTTP 解析开销（响应体仍是同一份 JSON，序列化成本不变）。
+
+**最小接法**
+
+1. 宿主只保留**一个** `PuppetWebServer` 实例（与外部通道同一套配置），把 Hub 暴露为宿主属性：
+   ```csharp
+   public PuppetHub AgentHub => _server?.Hub;   // 引擎重建后自动指向新实例
+   ```
+2. 工具层每次调用**现取** Hub，不要构造时缓存：
+   ```csharp
+   private static PuppetHub Hub => Host.Instance?.AgentHub;
+   ```
+3. 用一层薄封装统一收口：`GET/POST` → `hub.GetAsync/PostAsync`；`200/204` 视为成功，其余按 `Status + Body` 生成可读失败，异常也转成失败结果，大响应截断后再交给模型。
+4. 路径段（实例名、action 名、属性路径）先 `Uri.EscapeDataString`；action 名保留原大小写；`args` 原样传对象，不要预序列化成字符串。
+
+**边界与陷阱**
+
+- **进程内 ≠ 免确认**：未预置的模态框按 `DialogBroker` 安全默认（Cancel/No）自动应答。破坏性 action 若依赖动作内部的确认框，宿主应在调用前弹真实确认，再把答案作为参数注入；否则会"静默未执行"。
+- **重启/探测放 `Task.Run`**：这类操作会 marshal 回 UI 线程，与在 UI 线程续延的 Agent 循环互等死锁（同上文 async 约束）。
+- **外部通道仍需 HTTP**：健康探测、重启验证、对外提供的地址与密钥照旧；Hub 可用不代表监听正常，反之亦然。
+- **收窄暴露面**：宿主已有原生技能覆盖的 action，可在 `manifest` 结果里过滤、并在调用入口直接拒绝，避免模型在两条路径间摇摆（仅影响内嵌 Agent，外部 Agent 不受影响）。
+
 ## TestGround 参考工程（仅源码引用模式可用）
 
 > ⚠️ **NuGet 包部署模式下不可用**：TestGround 项目是源码级参考实现，**不随 NuGet 包分发**。NuGet 模式下 Agent 无法直接阅读这些项目源码。
