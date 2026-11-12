@@ -40,6 +40,8 @@ namespace Puppet.Core.AppAgent
         public int WorkWidth { get; init; }
         /// <summary>工作区高。</summary>
         public int WorkHeight { get; init; }
+        /// <summary>该屏的 Windows/系统缩放比（96 DPI = 1.0）；DIP 换算与跨屏摆放用。未提供时按 1.0。</summary>
+        public double Scale { get; init; } = 1.0;
     }
 
     /// <summary>
@@ -88,6 +90,24 @@ namespace Puppet.Core.AppAgent
         void Activate();
         /// <summary>关闭窗口。</summary>
         void Close();
+    }
+
+    /// <summary>
+    /// DIP 几何能力（可选，由平台包实现）：Agent 按 **DIP**（96 DPI 逻辑像素）传坐标，
+    /// 实现方按**目标屏自己的缩放比**换算，跨屏 DPI 不同时不会把主屏系数套到别的屏上。
+    /// 坐标参考系：窗口 = 目标屏工作区左上角；控件 = 父容器左上角（screen 忽略）。
+    /// 不支持时（未实现本接口）框架不发布 DIP action，避免发布无法兑现的能力。
+    /// </summary>
+    public interface IPuppetUiDpi
+    {
+        /// <summary>按 DIP 移动；screen = Screens 里的屏索引，-1 = 当前屏。</summary>
+        OperationResult MoveDip(int x, int y, int screen);
+
+        /// <summary>按 DIP 缩放（保持位置，用元素自身所在屏/容器的缩放比）。</summary>
+        OperationResult ResizeDip(int width, int height);
+
+        /// <summary>按 DIP 同时设置位置与大小；screen 决定用哪块屏的缩放比。</summary>
+        OperationResult SetBoundsDip(int x, int y, int width, int height, int screen);
     }
 
     /// <summary>
@@ -157,6 +177,12 @@ namespace Puppet.Core.AppAgent
         public const string SetTitleAction = "SetTitleAction";
         /// <summary>设置窗口不透明度（0.0~1.0）。</summary>
         public const string SetOpacityAction = "SetOpacityAction";
+        /// <summary>按 DIP 移动（跨屏 DPI 各用各的系数；需适配器实现 <see cref="IPuppetUiDpi"/>）。</summary>
+        public const string MoveDipAction = "MoveDipAction";
+        /// <summary>按 DIP 缩放（保持位置）。</summary>
+        public const string ResizeDipAction = "ResizeDipAction";
+        /// <summary>按 DIP 同时设置位置与大小。</summary>
+        public const string SetBoundsDipAction = "SetBoundsDipAction";
         /// <summary>截取自身像素为 PNG（A 面合成方法；非实例成员，刻意不进 B 面 manifest）。</summary>
         public const string CaptureAction = "CaptureAction";
 
@@ -194,6 +220,24 @@ namespace Puppet.Core.AppAgent
                 list.Add(Base(SetOpacityAction, "设置窗口不透明度", P("opacity", "number", "0.0 全透明 ~ 1.0 不透明")));
                 list.Add(Base(CloseWindowAction, "关闭窗口",
                     P("confirm", "boolean", "true=直接关闭；false/null=需用户确认（Agent 上下文按安全默认取消）", required: false)));
+            }
+
+            // DIP 几何（可选能力）：只有适配器实现了 IPuppetUiDpi 才发布，避免发布兑现不了的动作
+            if (UiElementResolver?.Invoke(instance) is IPuppetUiDpi)
+            {
+                list.Add(Base(MoveDipAction,
+                    "按 DIP 移动（96 DPI 逻辑像素）。x/y 相对目标屏工作区左上角；跨屏 DPI 不同时用目标屏自己的缩放比，"
+                    + "不要拿主屏系数套别的屏。先读 Screens state 拿各屏 scale 与 work 区",
+                    P("x", "integer", "目标 X（DIP）"), P("y", "integer", "目标 Y（DIP）"),
+                    P("screen", "integer", "目标屏索引（见 Screens）；省略/-1 = 当前屏", required: false)));
+                list.Add(Base(ResizeDipAction,
+                    "按 DIP 缩放（保持位置，用元素所在屏/容器的缩放比）",
+                    P("width", "integer", "目标宽（DIP）"), P("height", "integer", "目标高（DIP）")));
+                list.Add(Base(SetBoundsDipAction,
+                    "按 DIP 同时设置位置与大小；x/y 相对 screen 的工作区左上角，宽高按该屏缩放比换算",
+                    P("x", "integer", "目标 X（DIP）"), P("y", "integer", "目标 Y（DIP）"),
+                    P("width", "integer", "目标宽（DIP）"), P("height", "integer", "目标高（DIP）"),
+                    P("screen", "integer", "目标屏索引（见 Screens）；省略/-1 = 当前屏", required: false)));
             }
             return list;
         }
@@ -247,7 +291,7 @@ namespace Puppet.Core.AppAgent
         {
             if (screens == null || screens.Count == 0) return "";
             return string.Join("; ", screens.Select((s, i) =>
-                $"[{i}] {s.DeviceName} bounds={s.X},{s.Y},{s.Width}x{s.Height} " +
+                $"[{i}] {s.DeviceName} scale={s.Scale:0.##} bounds={s.X},{s.Y},{s.Width}x{s.Height} " +
                 $"work={s.WorkX},{s.WorkY},{s.WorkWidth}x{s.WorkHeight}{(s.Primary ? " primary" : "")}"));
         }
 
@@ -259,6 +303,8 @@ namespace Puppet.Core.AppAgent
             var window = WindowResolver?.Invoke(instance);
 
             int Int(string k) => Convert.ToInt32(args.TryGetValue(k, out var v) && v != null ? v : 0);
+            int IntOr(string k, int fallback) =>
+                args.TryGetValue(k, out var v) && v != null ? Convert.ToInt32(v) : fallback;
             bool Bool(string k) => args.TryGetValue(k, out var v) && v is bool b && b;
 
             switch (actionName)
@@ -345,6 +391,23 @@ namespace Puppet.Core.AppAgent
                     window.Opacity = op;
                     return OperationResult.Success($"窗口不透明度已设为 {window.Opacity:0.##}");
 
+                case MoveDipAction:
+                case ResizeDipAction:
+                case SetBoundsDipAction:
+                {
+                    if (element is not IPuppetUiDpi dip)
+                        return OperationResult.Failure("该实例不支持 DIP 几何操作");
+                    if (actionName == ResizeDipAction)
+                    {
+                        if (Int("width") <= 0 || Int("height") <= 0) return OperationResult.Failure("宽高必须为正");
+                        return dip.ResizeDip(Int("width"), Int("height"));
+                    }
+                    if (actionName == MoveDipAction)
+                        return dip.MoveDip(Int("x"), Int("y"), IntOr("screen", -1));
+                    if (Int("width") <= 0 || Int("height") <= 0) return OperationResult.Failure("宽高必须为正");
+                    return dip.SetBoundsDip(Int("x"), Int("y"), Int("width"), Int("height"), IntOr("screen", -1));
+                }
+
                 default:
                     return null;
             }
@@ -417,7 +480,7 @@ namespace Puppet.Core.AppAgent
         private static bool IsUiBaseActionName(string methodName) => methodName is MoveAction or ResizeAction
             or SetBoundsAction or SetVisibleAction or SetEnabledAction or SetWindowStateAction
             or ActivateAction or CloseWindowAction or FocusAction or SetTopMostAction
-            or SetTitleAction or SetOpacityAction;
+            or SetTitleAction or SetOpacityAction or MoveDipAction or ResizeDipAction or SetBoundsDipAction;
 
         /// <summary>
         /// A 面 invoke 执行框架合成方法（参数位置与 <see cref="DescribeSynthetic"/> 一致；UI 基础 action 返回 OperationResult，CaptureAction 返回产物）。

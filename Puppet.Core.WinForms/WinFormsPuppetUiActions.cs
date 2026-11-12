@@ -35,7 +35,7 @@ namespace Puppet.Core.WinForms
             PuppetUiActions.Confirm ??= (owner, text, caption) =>
                 PuppetDialog.Ask(owner as IWin32Window, text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                     == DialogResult.Yes;
-            // 屏幕环境：供 Agent 了解单屏/多屏及各屏几何（/appagent/state/ScreenCount|Screens）
+            // 屏幕环境：供 Agent 了解单屏/多屏及各屏几何与缩放比（/appagent/state/ScreenCount|Screens）
             PuppetUiActions.ScreensProvider = () => Screen.AllScreens.Select(s => new PuppetScreen
             {
                 DeviceName = s.DeviceName,
@@ -47,11 +47,48 @@ namespace Puppet.Core.WinForms
                 WorkX = s.WorkingArea.X,
                 WorkY = s.WorkingArea.Y,
                 WorkWidth = s.WorkingArea.Width,
-                WorkHeight = s.WorkingArea.Height
+                WorkHeight = s.WorkingArea.Height,
+                Scale = ScaleOf(s)
             }).ToList();
         }
 
-        internal class WinFormsUiElement : IPuppetUiElement
+        /// <summary>
+        /// 目标屏的 Windows 缩放比（dpi/96）。系统感知进程直接问只会得到系统 DPI，
+        /// 故临时把本线程提成 PerMonitorV2 再问、问完立刻还原——混合 DPI 下才能拿到每屏真实值。
+        /// </summary>
+        public static double ScaleOf(Screen screen)
+        {
+            var hmon = WinFormsDpi.MonitorFromPoint(
+                new WinFormsDpi.NativePoint { X = screen.Bounds.Left + 1, Y = screen.Bounds.Top + 1 }, 2);
+            if (hmon == IntPtr.Zero) return 1.0;
+            IntPtr old = WinFormsDpi.SetThreadDpiAwarenessContext(WinFormsDpi.PerMonitorV2);
+            try
+            {
+                if (WinFormsDpi.GetDpiForMonitor(hmon, 0, out uint dx, out _) == 0 && dx > 0) return dx / 96.0;
+            }
+            finally { WinFormsDpi.SetThreadDpiAwarenessContext(old); }
+            return 1.0;
+        }
+
+        /// <summary>DPI 相关 P/Invoke（DIP 几何与逐屏缩放比用）。</summary>
+        internal static class WinFormsDpi
+        {
+            [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+            internal struct NativePoint { public int X; public int Y; }
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            internal static extern IntPtr MonitorFromPoint(NativePoint pt, uint flags);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            internal static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+
+            [System.Runtime.InteropServices.DllImport("shcore.dll")]
+            internal static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
+
+            internal static readonly IntPtr PerMonitorV2 = (IntPtr)(-4);
+        }
+
+        internal class WinFormsUiElement : IPuppetUiElement, IPuppetUiDpi
         {
             protected readonly Control C;
             public WinFormsUiElement(Control c) => C = c;
@@ -70,6 +107,26 @@ namespace Puppet.Core.WinForms
             public void Resize(int width, int height) { Normalize(); C.Size = new Size(width, height); }
             public void SetBounds(int x, int y, int width, int height) { Normalize(); C.Bounds = new Rectangle(x, y, width, height); }
             public void Focus() { C.Focus(); }
+
+            // ---- DIP 几何（控件语义：坐标相对父容器，缩放比用控件自身 DPI）----
+            public OperationResult MoveDip(int x, int y, int screen) => ApplyDip(x, y, null, null, screen);
+            public OperationResult ResizeDip(int width, int height) => ApplyDip(null, null, width, height, -1);
+            public OperationResult SetBoundsDip(int x, int y, int width, int height, int screen)
+                => ApplyDip(x, y, width, height, screen);
+
+            protected virtual OperationResult ApplyDip(int? dipX, int? dipY, int? dipW, int? dipH, int screen)
+            {
+                double scale = Math.Max(C.DeviceDpi / 96.0, 0.01);
+                int Px(int dip) => (int)Math.Round(dip * scale);
+                int w = dipW.HasValue ? Px(dipW.Value) : C.Width;
+                int h = dipH.HasValue ? Px(dipH.Value) : C.Height;
+                if (w <= 0 || h <= 0) return OperationResult.Failure("宽高必须为正");
+                int px = dipX.HasValue ? Px(dipX.Value) : C.Left;
+                int py = dipY.HasValue ? Px(dipY.Value) : C.Top;
+                SetBounds(px, py, w, h);
+                return OperationResult.Success(
+                    $"已按 DIP 设置 → {C.Left},{C.Top} {C.Width}×{C.Height}（×{scale:0.##}）");
+            }
         }
 
         internal sealed class WinFormsWindow : WinFormsUiElement, IPuppetWindow
@@ -114,6 +171,39 @@ namespace Puppet.Core.WinForms
             }
             public void Activate() => F.Activate();
             public void Close() => F.Close();
+
+            /// <summary>
+            /// 窗口语义的 DIP：x/y 相对**目标屏工作区左上角**，宽高按**目标屏**缩放比换算；
+            /// 位置钳进工作区（标题栏留一截），避免 Agent 把窗口摆到抓不回来的地方。
+            /// </summary>
+            protected override OperationResult ApplyDip(int? dipX, int? dipY, int? dipW, int? dipH, int screen)
+            {
+                var screens = Screen.AllScreens;
+                int current = Array.IndexOf(screens, Screen.FromControl(F));
+                int index = screen >= 0 && screen < screens.Length ? screen : current;
+                if (index < 0) index = 0;
+                var area = screens[index].WorkingArea;
+                double scale = Math.Max(ScaleOf(screens[index]), 0.01);
+                Rectangle rect = F.WindowState == FormWindowState.Normal ? F.Bounds : F.RestoreBounds;
+
+                int Px(int dip) => (int)Math.Round(dip * scale);
+                int w = dipW.HasValue ? Px(dipW.Value) : rect.Width;
+                int h = dipH.HasValue ? Px(dipH.Value) : rect.Height;
+                if (w <= 0 || h <= 0) return OperationResult.Failure("宽高必须为正");
+                int px = dipX.HasValue ? area.Left + Px(dipX.Value) : rect.X;
+                int py = dipY.HasValue ? area.Top + Px(dipY.Value) : rect.Y;
+                px = Math.Clamp(px, area.Left, Math.Max(area.Left, area.Right - Px(120)));
+                py = Math.Clamp(py, area.Top, Math.Max(area.Top, area.Bottom - Px(40)));
+
+                if (F.WindowState != FormWindowState.Normal) F.WindowState = FormWindowState.Normal;
+                F.Bounds = new Rectangle(px, py, w, h);
+                var applied = F.Bounds;
+                bool clamped = applied.Width != w || applied.Height != h;
+                return OperationResult.Success(
+                    $"已按 DIP 设置 → {applied.X},{applied.Y} {applied.Width}×{applied.Height}（屏 {index} ×{scale:0.##}）"
+                    + (clamped ? "；宽高被窗体最小尺寸钳制" : ""),
+                    $"{applied.X},{applied.Y},{applied.Width},{applied.Height}");
+            }
         }
 
         /// <summary>

@@ -553,10 +553,20 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
   → `MoveAction` / `ResizeAction` / `SetBoundsAction` / `SetVisibleAction` / `SetEnabledAction` / `FocusAction`
 - `IPuppetWindow : IPuppetUiElement`：`WindowState`(Normal/Maximized/Minimized) / `TopMost` / `Title` / `Opacity` / `Activate` / `Close`
   → 追加 `SetWindowStateAction(state: max|min|normal)` / `SetTopMostAction(on)` / `SetTitleAction(title)` / `SetOpacityAction(opacity)` / `ActivateAction` / `CloseWindowAction(confirm?)`
+- `IPuppetUiDpi`（可选）：`MoveDip` / `ResizeDip` / `SetBoundsDip`
+  → 追加 `MoveDipAction(x,y,screen?)` / `ResizeDipAction(width,height)` / `SetBoundsDipAction(x,y,width,height,screen?)`（跨屏 DPI 不同时用目标屏系数，见下）
 
 **屏幕环境（多屏感知）**：UI 能力实例自动带两个只读 state（`ScreensProvider` 注入时）——
 - `ScreenCount`（integer）：显示器数量（1=单屏，>1=多屏）
-- `Screens`（string）：各屏 `[索引] 设备名 bounds=x,y,w×h work=x,y,w×h primary?`；Agent 按需读 `/appagent/state/Screens`，据此把窗口摆到指定屏幕。该 state 随 **GUI 型 appagent 实例**的 B 面 catalog 提供；A 面经 `/agent/state?name=<GUI实例>&path=Screens`（或 `ScreenCount`）读取（1.3.1 起）。
+- `Screens`（string）：各屏 `[索引] 设备名 scale=缩放比 bounds=x,y,w×h work=x,y,w×h primary?`；Agent 按需读 `/appagent/state/Screens`，据此把窗口摆到指定屏幕。该 state 随 **GUI 型 appagent 实例**的 B 面 catalog 提供；A 面经 `/agent/state?name=<GUI实例>&path=Screens`（或 `ScreenCount`）读取（1.3.1 起）。
+
+**DIP 几何（跨屏不同 DPI 的通用解法，1.8.0）**：`MoveAction`/`ResizeAction`/`SetBoundsAction` 收的是**适配器坐标单位**（WinForms 为物理像素）。Agent 按 DIP 传参会偏（主屏 250% 时小 2.5 倍），且多屏缩放比不同时**不能**用一个全局系数换算。框架因此提供可选能力接口 `IPuppetUiDpi`：
+
+- 适配器实现 `MoveDip(x,y,screen)` / `ResizeDip(width,height)` / `SetBoundsDip(x,y,width,height,screen)`：窗口语义 = 坐标相对**目标屏工作区左上角**、宽高按**目标屏**缩放比换算；控件语义 = 相对父容器、用控件自身 DPI（`screen` 忽略）。
+- `UiElementResolver` 返回的对象实现该接口时，框架自动发布 `MoveDipAction(x,y,screen?)` / `ResizeDipAction(width,height)` / `SetBoundsDipAction(x,y,width,height,screen?)`；未实现则**不发布**（不发布兑现不了的能力，A 面 describe 同理）。
+- 逐屏缩放比走 `PuppetScreen.Scale`（96 DPI = 1.0），随 `Screens` state 输出 `scale=2.5`；`screen` 参数的索引与该 state 一致，省略/-1 = 当前屏。
+- WinForms 适配（`Puppet.Core.WinForms`）已实现：系统感知（SystemAware）进程直接调 `GetDpiForMonitor` 只会拿到系统 DPI，故临时 `SetThreadDpiAwarenessContext(PerMonitorV2)` 取完立刻还原；窗口位置会钳进工作区（标题栏留一截），返回**实际**矩形，被窗体最小尺寸钳制时在 message 里注明。
+- 边界：宿主进程若是 SystemAware，窗口矩形按目标屏换算正确，但内容仍按系统 DPI 渲染（跨 DPI 屏由 DWM 呈缩放画面）；要内容也逐屏正确，需宿主自己改 PerMonitorV2 并逐屏验证布局（框架不替宿主做这个决定）。
 
 接入（平台包设置解析器：实例 → 能力，返回 null 表示该实例无 UI 能力）：
 - `PuppetUiActions.UiElementResolver` / `WindowResolver` / `Confirm`（关闭确认，未注入按安全默认拒绝）/ `ScreensProvider`（屏幕枚举）/ `CaptureResolver`（内部截屏：实例 → `IPuppetCapture`，返回 null = 该实例无此能力）。
@@ -571,7 +581,8 @@ manifest 内容仍由编译期范式形状唯一决定（提案 §3.5 opt-in 修
 - 关闭属破坏性操作：`confirm=null` 走 `PuppetUiActions.Confirm`（Agent 上下文由 DialogBroker 按安全默认 No 自动应答，永不因模态框挂死）。
 - **模态自动应答双通道对称（1.2.8）**：A 通道（`/agent/*`）与 B 通道（`/appagent/*`）现在都在入口统一 `DialogBroker.Push`——A 推 `null`（无预答，纯安全默认），B 推动作调用预置的 `dialogPresets`。宿主侧 `PuppetDialog.Ask` 垫片无感知，两通道行为一致：Agent 上下文中模态永不阻塞。
 
-已实测（`TestGround.Winform`）：`MoveAction` / `SetBoundsAction` / `SetWindowStateAction` / `SetVisibleAction` / `SetEnabledAction` / `SetTopMostAction` / `SetTitleAction` / `SetOpacityAction` / `ActivateAction` / `CloseWindowAction(confirm:false)` 均生效；多屏下 `ScreenCount` / `Screens` 返回各屏几何。已实测（`TestGround.Wpf` + `Puppet.Core.Wpf`）：`CaptureAction` 全窗与区域截屏均生效，describe / invoke 两端点一致，产物为合法 PNG。
+已实测（`TestGround.Winform`）：`MoveAction` / `SetBoundsAction` / `SetWindowStateAction` / `SetVisibleAction` / `SetEnabledAction` / `SetTopMostAction` / `SetTitleAction` / `SetOpacityAction` / `ActivateAction` / `CloseWindowAction(confirm:false)` 均生效；多屏下 `ScreenCount` / `Screens` 返回各屏几何。已实测（`TestGround.Wpf` + `Puppet.Core.Wpf`）：`CaptureAction` 全窗与区域截屏均生效，describe / invoke 两端点一致，产物为合法 PNG。DIP 几何在混合 DPI 多屏真机（1.5x / 1.75x / 2.5x 三屏）上核对了逐屏换算、钳制与 A/B 两面一致性；`TestGround` 侧尚未加对应 SelfTest 用例。
+
 
 ### Actionize 覆盖度扫描（找出"未覆盖的用户操作"）
 
