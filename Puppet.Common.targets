@@ -11,7 +11,12 @@
 		<TrimmerRootAssembly>$(AssemblyName)</TrimmerRootAssembly>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 		<Version>1.8.1</Version>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 		<Description>Puppet Agent 操控框架</Description>
 	</PropertyGroup>
+	<ItemGroup>
+		<None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
 </Project>
