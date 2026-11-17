@@ -572,6 +572,7 @@ namespace Puppet.Core.Web
                 var agents = AgentBook.GetAll(includeStale).Select(a => new
                 {
                     a.Id, a.Purpose, a.Operation, a.PuppetInstanceName, a.CurrentSite,
+                    steps = AgentBook.SnapshotSteps(a),
                     idleSeconds = (int)Math.Max(0, (now - a.LastHeartbeatAt).TotalSeconds),
                     lastActive = a.LastHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss"),
                     a.EstimatedWaitSeconds,
@@ -613,11 +614,12 @@ namespace Puppet.Core.Web
                 var lmStr = body?["lockMode"]?.ToString();
                 LockMode lm = LockMode.None;
                 if (!string.IsNullOrEmpty(lmStr)) Enum.TryParse(lmStr, true, out lm);
+                var step = body?["step"]?.ToString();
 
                 if (!string.IsNullOrEmpty(id))
                 {
                     req.Queries["agentId"] = id;
-                    AgentBook.Heartbeat(id, purp, op, wait, "unknown", site, lm, note, message, messageTo);
+                    AgentBook.Heartbeat(id, purp, op, wait, "unknown", site, lm, note, message, messageTo, step);
                 }
 
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true }));
@@ -631,13 +633,19 @@ namespace Puppet.Core.Web
                 var id = body?["id"]?.ToString();
                 var waitOthers = body?["waitForOthers"]?.ToString() == "true";
                 var timeout = ParseInt(body?["timeoutSec"]?.ToString(), 30);
+                var farewell = body?["farewell"]?.ToString() ?? body?["say"]?.ToString();
 
                 if (string.IsNullOrEmpty(id)) { req.Response.StatusCode = 400; return true; }
 
                 req.Queries["agentId"] = id;
                 bool canShutdown = true;
                 if (waitOthers) canShutdown = AgentBook.CanShutdown(id, timeout);
-                if (canShutdown) AgentBook.Release(id);
+                if (canShutdown)
+                {
+                    // 带遗言 = 会话收场：清掉之前的留言只留最后一句；否则只是退场。
+                    if (string.IsNullOrWhiteSpace(farewell)) AgentBook.Release(id);
+                    else AgentBook.Leave(id, farewell);
+                }
 
                 req.Response.Buffer = Encoding.UTF8.GetBytes(Utils.ToJson(new { ok = true, canShutdown }));
                 req.Response.SetJsonContent();

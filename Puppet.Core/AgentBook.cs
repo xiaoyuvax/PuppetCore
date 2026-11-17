@@ -26,6 +26,8 @@ namespace Puppet.Core
         public DateTime? LastMessageAt { get; set; }
         /// <summary>最近一条对话的目标 Agent Id；空串表示广播。</summary>
         public string MessageTo { get; set; }
+        /// <summary>最近几次工具调用的一行摘要（旧→新）；同工作区的其他会话靠它看进展。</summary>
+        public List<string> Steps { get; set; } = new();
     }
 
     public sealed class ChatMessage
@@ -55,10 +57,24 @@ namespace Puppet.Core
         private static long _chatSeq;
         private const int MaxChatMessages = 500;
         private const int MaxChatTextLength = 4000;
+        private const int MaxAgentSteps = 12;
 
-        public static void Heartbeat(string agentId, string purpose, string operation, int estWaitSec, string puppetInstanceName, string site = null, LockMode lockMode = LockMode.None, string note = null, string message = null, string messageTo = null)
+        /// <summary>留言与登记的保留时长：超过就清理，保证留言板只反映最近这段时间的会话。</summary>
+        public static readonly TimeSpan Retention = TimeSpan.FromHours(6);
+
+        /// <summary>老化：丢掉过期的留言与长期没有心跳的登记（进程生命周期内不无限增长）。</summary>
+        public static void Prune(DateTime now)
+        {
+            var cutoff = now - Retention;
+            lock (_chatLock) _chat.RemoveAll(m => m.At < cutoff);
+            foreach (var pair in _agents)
+                if (pair.Value.LastHeartbeatAt < cutoff) _agents.TryRemove(pair.Key, out _);
+        }
+
+        public static void Heartbeat(string agentId, string purpose, string operation, int estWaitSec, string puppetInstanceName, string site = null, LockMode lockMode = LockMode.None, string note = null, string message = null, string messageTo = null, string step = null)
         {
             if (string.IsNullOrEmpty(agentId)) return;
+            Prune(DateTime.Now);
             if (message is { Length: > MaxChatTextLength }) message = message.Substring(0, MaxChatTextLength);
 
             _agents.AddOrUpdate(agentId,
@@ -77,7 +93,8 @@ namespace Puppet.Core
                     Note = note ?? "",
                     LastMessage = message ?? "",
                     LastMessageAt = string.IsNullOrEmpty(message) ? null : DateTime.Now,
-                    MessageTo = string.IsNullOrEmpty(message) ? "" : (messageTo ?? "")
+                    MessageTo = string.IsNullOrEmpty(message) ? "" : (messageTo ?? ""),
+                    Steps = string.IsNullOrWhiteSpace(step) ? new List<string>() : new List<string> { step }
                 },
                 (_, existing) =>
                 {
@@ -104,6 +121,16 @@ namespace Puppet.Core
                     else if (messageTo != null && !string.IsNullOrEmpty(existing.LastMessage))
                     {
                         existing.MessageTo = messageTo;
+                    }
+                    if (!string.IsNullOrWhiteSpace(step))
+                    {
+                        if (existing.Steps == null) existing.Steps = new List<string>();
+                        lock (existing.Steps)
+                        {
+                            existing.Steps.Add(step);
+                            if (existing.Steps.Count > MaxAgentSteps)
+                                existing.Steps.RemoveRange(0, existing.Steps.Count - MaxAgentSteps);
+                        }
                     }
                     return existing;
                 });
@@ -134,12 +161,44 @@ namespace Puppet.Core
             _agents.TryRemove(agentId, out _);
         }
 
+        /// <summary>
+        /// 会话收场：留下最后一句遗言，并清掉该 Agent 之前的全部留言（本进程生命周期内只留遗言）。
+        /// 与 <see cref="Release"/> 的区别是保留对话记录，供后来者看到它最后说了什么。
+        /// </summary>
+        public static void Leave(string agentId, string farewell)
+        {
+            if (string.IsNullOrEmpty(agentId)) return;
+            if (farewell is { Length: > MaxChatTextLength }) farewell = farewell.Substring(0, MaxChatTextLength);
+
+            lock (_chatLock)
+            {
+                if (!string.IsNullOrWhiteSpace(farewell))
+                    _chat.Add(new ChatMessage { Seq = ++_chatSeq, AgentId = agentId, Text = farewell, To = "", At = DateTime.Now });
+
+                // 同一 Agent 只保留最后一条（遗言）；重复调用也幂等。
+                var last = _chat.LastOrDefault(m => m.AgentId == agentId);
+                _chat.RemoveAll(m => m.AgentId == agentId && !ReferenceEquals(m, last));
+                while (_chat.Count > MaxChatMessages) _chat.RemoveAt(0);
+            }
+
+            _agents.TryRemove(agentId, out _);
+        }
+
         public static List<AgentInfo> GetAll(bool includeStale = false)
         {
+            Prune(DateTime.Now);
             var cutoff = DateTime.Now.AddMinutes(-5);
             return _agents.Values
                 .Where(a => includeStale || a.LastHeartbeatAt >= cutoff)
                 .ToList();
+        }
+
+        /// <summary>工具步骤的线程安全快照：心跳线程正在追加时直接 ToArray 会抛异常。</summary>
+        public static string[] SnapshotSteps(AgentInfo agent)
+        {
+            var steps = agent?.Steps;
+            if (steps == null) return Array.Empty<string>();
+            lock (steps) return steps.ToArray();
         }
 
         /// <summary>锁状态的自然语言描述（由 SiteLock 等可信来源派生时使用）。</summary>
@@ -161,6 +220,7 @@ namespace Puppet.Core
         /// <summary>按时间/关键字/收发方筛选本次应用启动以来的对话；结果按时间正序。</summary>
         public static List<ChatMessage> GetChat(DateTime? since = null, DateTime? until = null, string keyword = null, string from = null, string to = null)
         {
+            Prune(DateTime.Now);
             lock (_chatLock)
             {
                 IEnumerable<ChatMessage> query = _chat;
@@ -175,6 +235,7 @@ namespace Puppet.Core
 
         public static ChatOverview GetChatOverview()
         {
+            Prune(DateTime.Now);
             lock (_chatLock)
             {
                 if (_chat.Count == 0) return new ChatOverview { Summary = "no conversation yet" };

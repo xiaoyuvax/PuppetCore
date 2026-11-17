@@ -9,6 +9,7 @@ using Xunit;
 namespace Puppet.Core.Tests
 {
     /// <summary>PuppetWebHandler 核心路径：路由/鉴权/registry/invoke Broker 行为锚（1.2.8）。</summary>
+    [Collection("agent-book")]
     public class PuppetWebHandlerTests
     {
         private static WebRequest MakeReq(string method, string path, string authKey = null, string query = null)

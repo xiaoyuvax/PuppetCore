@@ -14,6 +14,7 @@ namespace Puppet.Core.Tests
     /// AppAgentWebHandler 实例解析与错误契约锚：单实例省略 ?name= 默认、
     /// 多实例省略 ?name= 拒绝（400 instance-name-required）、未命中错误携带 availableInstances 供 B 面枚举。
     /// </summary>
+    [Collection("agent-book")]
     public class AppAgentWebHandlerTests
     {
         private static WebRequest MakeReq(string method, string path, string authKey = null, string query = null)
