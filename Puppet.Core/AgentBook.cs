@@ -60,7 +60,10 @@ namespace Puppet.Core
         private const int MaxAgentSteps = 12;
 
         /// <summary>留言与登记的保留时长：超过就清理，保证留言板只反映最近这段时间的会话。</summary>
-        public static readonly TimeSpan Retention = TimeSpan.FromHours(6);
+        public static readonly TimeSpan Retention = TimeSpan.FromMinutes(30);
+
+        /// <summary>步骤统一由本进程打时间：留言板上所有会话的步骤共用一个时钟，同伴能看出一条步骤是多久以前的。</summary>
+        private static string Stamped(string step) => DateTime.Now.ToString("HH:mm:ss") + " " + step;
 
         /// <summary>老化：丢掉过期的留言与长期没有心跳的登记（进程生命周期内不无限增长）。</summary>
         public static void Prune(DateTime now)
@@ -94,7 +97,7 @@ namespace Puppet.Core
                     LastMessage = message ?? "",
                     LastMessageAt = string.IsNullOrEmpty(message) ? null : DateTime.Now,
                     MessageTo = string.IsNullOrEmpty(message) ? "" : (messageTo ?? ""),
-                    Steps = string.IsNullOrWhiteSpace(step) ? new List<string>() : new List<string> { step }
+                    Steps = string.IsNullOrWhiteSpace(step) ? new List<string>() : new List<string> { Stamped(step) }
                 },
                 (_, existing) =>
                 {
@@ -127,7 +130,7 @@ namespace Puppet.Core
                         if (existing.Steps == null) existing.Steps = new List<string>();
                         lock (existing.Steps)
                         {
-                            existing.Steps.Add(step);
+                            existing.Steps.Add(Stamped(step));
                             if (existing.Steps.Count > MaxAgentSteps)
                                 existing.Steps.RemoveRange(0, existing.Steps.Count - MaxAgentSteps);
                         }

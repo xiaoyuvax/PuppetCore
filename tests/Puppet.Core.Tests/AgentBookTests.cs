@@ -33,8 +33,9 @@ namespace Puppet.Core.Tests
 
             var info = AgentBook.GetAll(includeStale: true).Single(a => a.Id == id);
             Assert.Equal(12, info.Steps.Count);
-            Assert.Equal("step4", info.Steps[0]);
-            Assert.Equal("step15", info.Steps[^1]);
+            Assert.EndsWith(" step4", info.Steps[0]);
+            Assert.EndsWith(" step15", info.Steps[^1]);
+            Assert.Matches(@"^\d{2}:\d{2}:\d{2} step4$", info.Steps[0]);
             AgentBook.Release(id);
         }
 
