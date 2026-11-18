@@ -37,4 +37,5 @@ dotnet pack PuppetCore.slnx -c Release -o "D:\PUB\Nuget Packages"
 - 各项目 `GlobalUsing.cs` — 全局 `using JSN = Newtonsoft.Json;`
 - `Puppet.Core/AppAgent/PuppetUiActions.cs` — UI 基础 action 能力抽象（`IPuppetUiElement`/`IPuppetWindow` + 平台解析器注入点；跨 WinForms/WPF/Web）
 - `Puppet.Core.WinForms/WinFormsPuppetUiActions.cs` — WinForms 适配（`UseFormControls()` 自动注入 Form/Control 能力）
+- `Puppet.Core.WinUI/WinUiPuppetCapture.cs` — WinUI 3 截屏适配（`UseWinUiCapture(() => hwnd)` 注入；PrintWindow 取本窗口像素，PNG 由 `WinUiPng.cs` 用 BCL 编码）
 - `D:\PUB\Nuget Packages` — 固定打包输出目录

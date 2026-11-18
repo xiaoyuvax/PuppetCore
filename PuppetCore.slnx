@@ -5,6 +5,7 @@
   </Folder>
   <Project Path="Puppet.Core.WinForms/Puppet.Core.WinForms.csproj" />
   <Project Path="Puppet.Core.Wpf/Puppet.Core.Wpf.csproj" />
+  <Project Path="Puppet.Core.WinUI/Puppet.Core.WinUI.csproj" />
   <Project Path="TestGround.Winform/TestGround.Winform.csproj" />
   <Project Path="TestGround.Console/TestGround.Console.csproj" />
   <Project Path="TestGround.Wpf/TestGround.Wpf.csproj" />

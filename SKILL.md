@@ -2,7 +2,7 @@
 name: puppet-core
 description: >
   Use the Puppet.Core .NET agent-control framework: discover, observe, and drive a running
-  .NET host application (WinForms/WPF/Console/ASP.NET Core) through its /agent/* HTTP API
+  .NET host application (WinForms/WPF/WinUI/Console/ASP.NET Core) through its /agent/* HTTP API
   or the /mcp MCP endpoint. Use when asked to debug, test, or automate a .NET app that
   references Puppet.Core, or when the user mentions Puppet, /agent/invoke, /appagent, or MCP
   tools for a local .NET host.

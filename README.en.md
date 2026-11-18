@@ -35,6 +35,7 @@ Puppet.Core enables agents to **automatically debug applications** — specifica
 | Puppet.Core | Generic core: interfaces, serialization, capability description, registry, web endpoints, built-in web server, usage logging, console process diagnostics |
 | Puppet.Core.WinForms | WinForms support: control-tree traversal, Click / Text / Select operations |
 | Puppet.Core.Wpf | WPF support: internal screen capture adapter (`RenderTargetBitmap`), wired up by the host via `UseWpfCapture()` |
+| Puppet.Core.WinUI | WinUI 3 support: internal screen capture adapter (`PrintWindow` reads the window's own pixels), wired up by the host via `UseWinUiCapture(() => hwnd)` |
 | TestGround.Winform | WinForms demo app (task board) |
 | TestGround.Console | Console demo app (expense ledger) |
 | TestGround.Wpf | WPF demo app (reading list) |
@@ -145,7 +146,7 @@ Historically, letting an agent drive a GUI app meant **UI Automation** (screensh
 Puppet.Core takes a different route — it promotes **actions to first-class citizens** (the Actionize paradigm), so an agent drives the app through **semantic action names plus structured arguments**, never going through the UI side:
 
 * **It never goes through the UI side (the root reason)**: not driven by screenshots or synthesized input, no dependence on control handles or focus. The reason is that Puppet does not share an operating path with the user — the agent's commands never enter the UI pipeline, so it neither competes for focus nor gets disturbed by what the user does. The result is inherent stability, concurrency safety, auditability, and regressibility (action names are stable, so UI redesigns do not break agent instructions)
-* **Screen images come from inside the application**: when it needs to "take a look", it uses facet A via `GET /agent/describe` + `POST /agent/invoke?method=CaptureAction` (WinForms and WPF supported), reading pixels the application rendered itself — an image of the UI held on the Puppet side. It intercepts nothing, covers nothing, and never produces a full-screen-sized image on multi-monitor setups, in keeping with the principle of not sharing a path with the user and not interfering
+* **Screen images come from inside the application**: when it needs to "take a look", it uses facet A via `GET /agent/describe` + `POST /agent/invoke?method=CaptureAction` (WinForms, WPF and WinUI supported), reading pixels the application rendered itself — an image of the UI held on the Puppet side. It intercepts nothing, covers nothing, and never produces a full-screen-sized image on multi-monitor setups, in keeping with the principle of not sharing a path with the user and not interfering
 * **Actions are the interface**: business logic inside event handlers, once lifted into `public` methods returning a success/failure type (`bool` / `OperationResult` / `Task<…>`), is **automatically** published in the capability catalog `GET /appagent/manifest`; agents invoke it via `POST /appagent/actions/{name}`
 * **Modal dialogs are proxyable**: entry points use `PuppetDialog.Ask` instead of `MessageBox.Show`, so an agent answers through the `dialogs` preset table and **never blocks**
 * **Zero-configuration discovery**: enumerate `%LOCALAPPDATA%\Puppet.AppAgents\*.json` to get `{app, endpoint, key}` (isolated by user-profile ACLs); the user just says "look at local port 9090"
@@ -179,6 +180,7 @@ Puppet.Core provides **in-app screenshot** capability — **no OS/UI Automation 
 |-----------|----------------|-------------|------------|
 | **WinForms** | `Control.DrawToBitmap` reads the control's own rendered pixels | `new PuppetWebServer().UseFormControls().Start(...)` auto-injects | Any control/form region; mixed-DPI multi-monitor offset fixed |
 | **WPF** | `RenderTargetBitmap` renders the visual tree | Host calls `UseWpfCapture()` (requires `Puppet.Core.Wpf` reference) | Any `Visual` element; element-level or window-level |
+| **WinUI 3** | `PrintWindow` (`PW_RENDERFULLCONTENT`) reads the window's DWM-composited pixels | Host calls `UseWinUiCapture(() => hwnd)` (requires `Puppet.Core.WinUI` reference) | Coordinates are physical pixels relative to the client-area origin; works while occluded; a minimized window is restored in place without activation |
 | **ASP.NET Core** | Page side: DOM clone → inline computed styles per element → SVG foreignObject → `<img>` data:URL decode → canvas → PNG | Code ships with page, **off by default**; user checks "Allow Puppet to capture this page image" → page polls `GET /api/screenshot/pending` every second, posts back base64 PNG | **Opt-in, not standing capability**; user can uncheck/navigate away to stop; Puppet cannot self-enable; PNG magic bytes validated, 8B–1.5MB, id must match; 5s timeout |
 
 **Unified invocation protocol (A-facet synthetic method)**:
@@ -189,7 +191,7 @@ Authorization: Bearer <key>
 
 [10, 20, 300, 200]  // x, y, width, height (all optional; omit/≤0 = whole element)
 ```
-Returns: `PuppetArtifact` (base64-inlined PNG bytes). Same `describe`/`invoke` contract across all three host types.
+Returns: `PuppetArtifact` (base64-inlined PNG bytes). Same `describe`/`invoke` contract across all host types.
 
 > **Key difference**: traditional UI Automation relies on OS full-screen capture / synthesized input — fragile to focus, occlusion, multi-monitor. Puppet's in-app screenshot is **the pixels the app itself painted**; the agent merely "takes a look" — no focus contention, no user interference, concurrent-safe, auditable.
 

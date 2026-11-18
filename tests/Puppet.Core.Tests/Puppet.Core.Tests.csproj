@@ -16,6 +16,7 @@
 	</PropertyGroup>
 	<ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows7.0'">
 		<Compile Remove="FormPuppetExtensionsTests.cs" />
+		<Compile Remove="WinUiPngTests.cs" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -30,6 +31,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\..\Puppet.Core\Puppet.Core.csproj" />
 		<ProjectReference Include="..\..\Puppet.Core.WinForms\Puppet.Core.WinForms.csproj" Condition="'$(TargetFramework)' == 'net10.0-windows7.0'" />
+		<ProjectReference Include="..\..\Puppet.Core.WinUI\Puppet.Core.WinUI.csproj" Condition="'$(TargetFramework)' == 'net10.0-windows7.0'" />
 	</ItemGroup>
 
 </Project>

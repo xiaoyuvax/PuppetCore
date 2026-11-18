@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<Import Project="..\Puppet.Common.targets" />
+
+	<PropertyGroup>
+		<TargetFrameworks>net8.0-windows7.0;net9.0-windows7.0;net10.0-windows7.0</TargetFrameworks>
+		<RootNamespace>Puppet.Core.WinUI</RootNamespace>
+		<Description>Puppet.Core 的 WinUI 3 适配：应用内截屏（PrintWindow 取本窗口像素）</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Puppet.Core\Puppet.Core.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Puppet.Core.Tests" />
+	</ItemGroup>
+
+</Project>

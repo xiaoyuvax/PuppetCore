@@ -35,6 +35,7 @@ Puppet.Core 让 Agent **自动调试应用程序**——面向需要编译后进
 | Puppet.Core | 通用核心：接口、序列化、能力描述、注册表、Web 端点、内建 Web 服务器、使用日志、Console 进程诊断 |
 | Puppet.Core.WinForms | WinForms 专用：控件树遍历、Click / Text / Select 控件操作 |
 | Puppet.Core.Wpf | WPF 专用：内部截屏适配（`RenderTargetBitmap`），宿主 `UseWpfCapture()` 接入 |
+| Puppet.Core.WinUI | WinUI 3 专用：内部截屏适配（`PrintWindow` 取本窗口像素），宿主 `UseWinUiCapture(() => hwnd)` 接入 |
 | TestGround.Winform | WinForms 演示应用（任务看板） |
 | TestGround.Console | 控制台演示应用（支出账本） |
 | TestGround.Wpf | WPF 演示应用（阅读清单） |
@@ -145,7 +146,7 @@ Puppet.Core 是**一套内核、两个门面**：
 Puppet.Core 走的是另一条路——**把"动作"提升为一等公民**（Actionize 范式），Agent 用**语义化动作名 + 结构化参数**驱动应用，全程不走 UI 侧接口：
 
 * **不走 UI 侧接口（根本原因）**：不靠截屏 / 合成输入驱动、不依赖控件句柄与焦点。这样做是因为 Puppet 不与用户共享同一条操作流程——Agent 的指令从不进入 UI 通路，因而既不与用户抢焦点，也不会被用户操作打断；由此带来天然稳定、可并发、可审计、可回归（动作名稳定，UI 改版不影响 Agent 指令）
-* **界面截图取自应用内部**：需要"看一眼界面"时走 A 面 `GET /agent/describe` + `POST /agent/invoke?method=CaptureAction`（WinForms / WPF 均支持），读取的是应用自己绘制出来的像素——这是 Puppet 侧对 UI 的一份映像，不拦截输入、不遮挡界面、多屏下也不产生整屏大图，与"互不共享流程、互不干扰"的原则一致
+* **界面截图取自应用内部**：需要"看一眼界面"时走 A 面 `GET /agent/describe` + `POST /agent/invoke?method=CaptureAction`（WinForms / WPF / WinUI 均支持），读取的是应用自己绘制出来的像素——这是 Puppet 侧对 UI 的一份映像，不拦截输入、不遮挡界面、多屏下也不产生整屏大图，与"互不共享流程、互不干扰"的原则一致
 * **动作即接口**：事件处理器里的业务逻辑提炼为 `public` + 成败返回（`bool` / `OperationResult` / `Task<…>`）的方法，即**自动**进入能力目录 `GET /appagent/manifest`；Agent 按动作名与参数调用 `POST /appagent/actions/{name}`
 * **模态框可代理**：带对话框的入口以 `PuppetDialog.Ask` 替代 `MessageBox.Show`，Agent 经 `dialogs` 预答表代答，**永不阻塞**
 * **零配置发现**：枚举 `%LOCALAPPDATA%\Puppet.AppAgents\*.json` 即得 `{app, endpoint, key}`（用户档案 ACL 隔离）；用户只需说"访问本地 9090 端口了解详情"
@@ -199,6 +200,7 @@ Puppet.Core 提供**应用内截图**能力——**不走 OS/UI Automation 截�
 |----------|----------|----------|------|
 | **WinForms** | `Control.DrawToBitmap` 读取控件自身已绘制像素 | `new PuppetWebServer().UseFormControls().Start(...)` 自动注入 | 支持任意控件/窗体区域截取；混合 DPI 多显示器已修复裁切偏移 |
 | **WPF** | `RenderTargetBitmap` 渲染可视化树 | 宿主调用 `UseWpfCapture()`（需引用 `Puppet.Core.Wpf`） | 支持任意 `Visual` 元素截取；元素级/窗口级均可 |
+| **WinUI 3** | `PrintWindow`（`PW_RENDERFULLCONTENT`）取本窗口的 DWM 合成结果 | 宿主调用 `UseWinUiCapture(() => hwnd)`（需引用 `Puppet.Core.WinUI`） | 坐标为物理像素、相对客户区左上角；窗口被遮挡仍可截；最小化时原位还原但不上前台 |
 | **ASP.NET Core** | 页面端：DOM 克隆 → 逐元素内联计算样式 → SVG foreignObject → `<img>` data:URL 解码 → canvas → PNG | 页面随代码下发，**默认关闭**；用户勾选"允许 Puppet 获取本页渲染截图"后才每秒轮询 `GET /api/screenshot/pending`，回传 base64 PNG | **按需授权、非常设能力**；用户可随时取消勾选/离页停止；Puppet 无法自行开启；PNG 魔数校验、8B~1.5MB、id 匹配；5s 超时 |
 
 **统一调用协议（A 面合成方法）**：
@@ -209,7 +211,7 @@ Authorization: Bearer <key>
 
 [10, 20, 300, 200]  // x, y, width, height（全可选，省略/≤0 = 整个元素）
 ```
-返回：`PuppetArtifact`（base64 内联 PNG 字节）。同一 `describe/invoke` 契约覆盖所有三类宿主。
+返回：`PuppetArtifact`（base64 内联 PNG 字节）。同一 `describe/invoke` 契约覆盖所有宿主类型。
 
 > **关键区别**：传统 UI Automation 靠 OS 截全屏/合成输入，易受焦点/遮挡/多屏干扰；Puppet 的应用内截图是**应用自己画好的像素**，Agent 只是"看一眼"——不抢焦点、不干扰用户、可并发、可审计。
 
