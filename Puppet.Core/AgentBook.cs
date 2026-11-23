@@ -65,6 +65,16 @@ namespace Puppet.Core
         /// <summary>步骤统一由本进程打时间：留言板上所有会话的步骤共用一个时钟，同伴能看出一条步骤是多久以前的。</summary>
         private static string Stamped(string step) => DateTime.Now.ToString("HH:mm:ss") + " " + step;
 
+        /// <summary>
+        /// 清空全部登记与留言。测试用：会话登记是进程级静态状态，上一个测试残留的登记
+        /// 会让下一个测试的 AnnouncePeers 多出一条「同工作区 peer」协作提示（实测整套测试因此挂 12 个）。
+        /// </summary>
+        public static void Reset()
+        {
+            _agents.Clear();
+            lock (_chatLock) _chat.Clear();
+        }
+
         /// <summary>老化：丢掉过期的留言与长期没有心跳的登记（进程生命周期内不无限增长）。</summary>
         public static void Prune(DateTime now)
         {
